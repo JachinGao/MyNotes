@@ -1,0 +1,1065 @@
+# SurfaceFling交互过程
+
+每个应用都对应surfaceflinger端一个surface，每个应用都会申请一块用于存储渲染数据的内存块，这个内存是通过gralloc分配的，但是gralloc给应用分配的只是普通内存，只有给surfaceflinger才分配了真正的对应显示屏的内存。
+
+
+
+## 一、概述
+
+1. SurfaceComposerClient类内部有一个实现了ISurfaceComposerClient接口的Binder代理对象mClient，这个Binder代理对象引用了SurfaceFlinger服务，SurfaceComposerClient类就是通过它来和SurfaceFlinger服务通信的。
+2. 通过调用SurfaceComposerClient对象mSession的成员函数createSurface可以获得一个SurfaceControl对象control。进一步的，SurfaceComposerClient类的成员函数createSurface首先调用内部的Binder代理对象mClient来请求SurfaceFlinger返回一个类型为SurfaceLayer的Binder代理对象，接着再使用这个Binder代理对象来创建一个SurfaceControl对象。
+3. 创建出来的SurfaceControl对象的成员变量mSurface就指向了从SurfaceFlinger返回来的类型为SurfaceLayer的Binder代理对象。有了这个Binder代理对象之后，SurfaceControl对象就可以和SurfaceFlinger服务通信了。
+
+
+
+#### 系统层的整个渲染过程
+
+1. 响应客户端事件，创建 Layer 与客户端的 Surface 建立连接。
+
+2. 接收客户端数据及属性，修改 Layer 属性，如尺寸、颜色、透明度等UI元数据；
+
+3. 将创建的 Layer 内容刷新到屏幕上。
+
+应用程序和SurfaceFlinger位于两个不同的进程，需要跨进程的通信机制来实现数据传输，在 Android的显示系统，使用了 Android 的匿名共享内存。**每一个应用和 SurfaceFlinger之间都会创建一个 SharedClient，**SharedClient 包含的是 SharedBufferStack 的集合。因为最多可以创建 31 个 SharedBufferStack，这也意味着一个 Android 应用程序最多可以包含 31 个窗口。
+
+显示整体流程分为两步：应用层将UI元数据传到缓存区，SurfaceFlinger 把缓存区数据渲染，传到屏幕进行显示。
+
+
+
+
+## 二、应用程序与SurfaceFlinger服务的关系
+
+1. 每一个Android应用程序与SurfaceFlinger服务都有一个连接，这个连接都是通过一个类型为Client的Binder对象来描述。
+
+   这些Client对象是Android应用程序连接到SurfaceFlinger服务的时候由SurfaceFlinger服务创建的，而当Android应用程序成功连接到SurfaceFlinger服务之后，就可以获得一个对应的Client对象的Binder代理接口。有了这些Binder代理接口之后，Android应用程序就可以通知SurfaceFlinger服务来绘制自己的UI。
+
+   Android应用程序在通知SurfaceFlinger服务来绘制自己的UI的时候，需要将UI元数据传递给SurfaceFlinger服务，例如，要绘制UI的区域、位置等信息。一个Android应用程序可能会有很多个窗口，而每一个窗口都有自己的UI元数据，因此，Android应用程序需要传递给SurfaceFlinger服务的UI元数据是相当多的。这里就使用Android系统的匿名共享内存机制（Anonymous Shared Memory）。
+
+
+2. Application与Client之间需要通过SharedClient，它里面维护着SharedBufferStack，最多31个；
+
+   一般我们就绘制UI的时候，都会采用一种称为“双缓冲”的技术。SurfaceFlinger服务只不过是将传统的“双缓冲”技术升华和抽象为了一个SharedBufferStack。
+
+   在SurfaceFlinger服务中，每一个SharedBufferStack都对应一个Surface，即一个窗口。这样，我们就可以知道为什么每一个SharedClient里面包含的是一系列SharedBufferStack而不是单个SharedBufferStack：一个SharedClient对应一个Android应用程序，而一个Android应用程序可能包含有多个窗口，即Surface。从这里也可以看出，一个Android应用程序至多可以包含31个Surface。
+
+3. SharedBufferStack中的缓冲区只是用来描述UI元数据的，这意味着它们不包含真正的UI数据。真正的UI数据保存在GraphicBuffer中，为了完整地描述一个UI，SharedBufferStack中的每一个已经使用了的缓冲区都对应有一个GraphicBuffer，用来描述真正的UI数据。
+
+4. **当Android应用程序需要更新一个Surface的时候，它就会找到与它所对应的SharedBufferStack，**并且从它的空闲缓冲区列表的尾部取出一个空闲的Buffer。我们假设这个取出来的空闲Buffer的编号为index。接下来Android应用程序就请求SurfaceFlinger服务为这个编号为index的Buffer分配一个图形缓冲区GraphicBuffer。
+
+   SurfaceFlinger服务分配好图形缓冲区GraphicBuffer之后，会将它的编号设置为index，然后再将这个图形缓冲区GraphicBuffer返回给Android应用程序访问。**Android应用程序得到了SurfaceFlinger服务返回的图形缓冲区GraphicBuffer之后，就在里面写入UI数据。**
+
+   写完之后，就将与它所对应的缓冲区，即编号为index的Buffer，插入到对应的SharedBufferStack的已经使用了的缓冲区列表的头部去。这一步完成了之后，Android应用程序就通知SurfaceFlinger服务去绘制那些保存在已经使用了的缓冲区所描述的图形缓冲区GraphicBuffer了。
+
+5. SharedBufferStack是在Android应用程序和SurfaceFlinger服务之间共享的，但是，Android应用程序和SurfaceFlinger服务使用SharedBufferStack的方式是不一样的。
+
+   Android应用程序关心的是它里面的空闲缓冲区列表，而SurfaceFlinger服务关心的是它里面的已经使用了的缓冲区列表。从SurfaceFlinger服务的角度来看，保存在SharedBufferStack中的已经使用了的缓冲区其实就是在排队等待渲染。
+
+6. 为了方便SharedBufferStack在Android应用程序和SurfaceFlinger服务中的访问，Android系统分别使用SharedBufferClient和SharedBufferServer来描述SharedBufferStack。
+
+   SharedBufferClient用来在Android应用程序这一侧访问SharedBufferStack的空闲缓冲区列表，而SharedBufferServer用来在SurfaceFlinger服务这一侧访问SharedBufferStack的排队缓冲区列表。
+
+   只要SharedBufferStack中的available的buffer的数量大于0，SharedBufferClient就会将指针tail往前移一步，并且减少available的值，以便可以获得一个空闲的Buffer。当Android应用程序往这个空闲的Buffer写入好数据之后，它就会通过SharedBufferClient来将它添加到SharedBufferStack中的排队缓冲区列表的尾部去，即指针queue_head的下一个位置上。
+   
+   
+
+
+## 三、应用程序与SurfaceFlinger服务的连接
+
+在SurfaceComposerClient类内部，有一个类型为sp<ISurfaceComposerClient>的成员变量mClient，它指向的实际上是一个类型为BpSurfaceComposerClient的Binder代理对象，而这个类型为BpSurfaceComposerClient的Binder代理对象引用的是一个类型为Client的Binder本地对象。类型为Client的Binder本地对象是由SurfaceFlinger服务来负责创建的，并且运行在SurfaceFlinger服务中，用来代表使用SurfaceFlinger服务的一个客户端，即一个与UI相关的Android应用程序。
+
+Client类和BpSurfaceComposerClient类分别是一个Binder本地对象类和一个Binder代理对象类。
+
+**ISurfaceComposerClient接口有两个重要的成员函数getControlBlock和createSurface：**
+
+* 成员函数getControlBlock()用来获得由SurfaceFlinger服务创建的一块用来传递UI元数据的匿名共享内存；用来传递UI元数据的匿名共享内存最终会被结构化为一个**SharedClient**对象，这个SharedClient对象在每个应用程序进程中至多存在一个。
+
+* 成员函数createSurface()用来请求SurfaceFlinger服务创建一个Surface；
+
+由于SurfaceFlinger服务实现了ISurfaceComposer接口，因此，我们可以将前面获得的SurfaceFlinger服务的代理接口赋值给一个类型为ISurfaceComposer的强指针sm，**并且调用它的成员函数createConnection来请求SurfaceFlinger服务创建一个连接，即创建一个类型为Client的Binder对象**，并且将这个Binder对象的一个代理接口conn返回来。SurfaceComposerClient类获得了SurfaceFlinger服务返回来的Client代理接口conn之后，就将它保存自己的成员变量mClient中。
+
+Client类有两个成员变量mFlinger和mNameGenerator，它们的类型分别为sp<SurfaceFlinger>和int32_t，前者指向了SurfaceFlinger服务，而后者用来生成SurfaceFlinger服务为Android应用程序所创建的每一个Surface的名称。例如，假设一个Android应用程序请求SurfaceFlinger创建了两个Surface，那么第一个Surface的名称就由数字1来描述，而第二个Surface就由数字2来描述，依次类推。一个Android应用程序最多可以创建31个Surface。
+
+
+
+## 四、共享UI元数据（SharedClient）的创建
+
+每一个与UI有关的Android应用程序进程有且仅有一个SharedClient对象，而且这些SharedClient对象是由Android应用程序请求SurfaceFlinger服务创建的。
+
+Android应用程序首先获得SurfaceFlinger服务的一个Binder代理接口，然后再通过这个代理接口得到另外一个**类型为UserClient的Binder代理接口**，最后就可以通过后一个Binder代理接口来获得一个SharedClient对象。
+
+### 1. SharedClient创建过程
+
+由于每一个与UI有关的Android应用程序进程有且仅有一个SharedClient对象，因此，**Android系统就通过一个单例模式的类来负责创建和管理这个SharedClient对象，这个类的名称为SurfaceClient。**
+
+1. 当SurfaceClient类的静态成员函数getInstance第一次被调用的时候，系统就会在对应的应用程序进程中创建一个SurfaceClient对象，即会调用SurfaceClient类的构造函数。
+
+2. SurfaceClient类的构造函数首先会调用ComposerService类的静态成员函数getComposerService来获得一个SurfaceFlinger服务的代理接口，并且保存在SurfaceClient类的成员变量mComposerService中，以便以后可以使用。
+
+3. 有了SurfaceFlinger服务的代理接口sf之后，SurfaceClient类的构造函数接着就可以调用它的成员函数createClientConnection来获得一个类型为**UserClient**的Binder代理接口，**这个Binder代理接口实现了ISurfaceComposerClient接口**，因此，我们可以将它保存在SurfaceClient类的成员变量mClient中。
+
+4. 最后，SurfaceClient类的构造函数就调用前面获得的类型为ISurfaceComposerClient的Binder代理接口mClient的成员函数getControlBlock来获得一块用来描述应用程序UI元数据的匿名共享内存mControlMemory ，并且将这些匿名共享内存强制转化为一个SharedClient对象mControl，以便后面可以方便地访问UI元数据。
+
+>  UserClient类和Client类是类似的，它们都实现了相同的接口，只不过是侧重点有所不同。
+>
+>  UserClient类与Client类最重要的区别是，前者实现了ISurfaceComposerClient接口的成员函数getControlBlock，而后者实现了ISurfaceComposerClient接口的成员函数createSurface。
+
+ 
+
+**Step 1. SurfaceFlinger::createClientConnection**
+
+SurfaceFlinger类的成员函数createClientConnection()，创建了一个类型为UserClient的Binder对象client，并且获得它的一个ISurfaceComposerClient接口，最后将这个ISurfaceComposerClient接口，即一个UserClient代理对象，返回给Android应用程序进程。
+
+**Step 2. new UserClient**
+
+UserClient类的成员变量mFlinger是一个类型为SurfaceFlinger的强指针，它指向了SurfaceFlinger服务， UserClient类的另外一个成员变量mBitmap是一个int32_t值，它是用来为Android应用程序的Surface分配Token值的，即如果它的第n位等于1，那么就表示值等于n的Token已经被分配出去使用了。
+
+UserClient类的构造函数首先得到一个SharedClient对象的大小，接着再将这个大小对齐到页面边界，于是就得到了接下来要创建的匿名共享块的大小cblksize。这块匿名共享内存是一个MemoryHeapBase对象描述的，并且保存在UserClient类的成员变量mCblkHeap。
+
+UserClient类的构造函数得到了一块匿名共享内存之后，紧接着就在这块匿名共享内存上创建了一个SharedClient对象，并且保存在UserClient类的成员变量ctrlblk中，以便后面可以通过它来访问Android应用程序的UI元数据。
+
+
+
+ **Step 3. return BpSurfaceComposerClient**
+
+UserClient对象返回Android应用程序进程，就可以将它封装成一个类型为BpSurfaceComposerClient的Binder代理对象。
+
+
+
+ **Step 4. UserClient::getControlBlock**
+
+```c++
+sp<IMemoryHeap> UserClient::getControlBlock() const {
+    return mCblkHeap;
+}
+```
+
+UserClient类的成员变量mCblkHeap指向了一块匿名共享内存，UserClient类将这块匿名共享内存返回给Android应用程序之后，Android应用程序就会将它结构化成一个SharedClient对象来访问，并且保存在SurfaceClient类的成员变量mControl中。
+
+### 2. SharedClient类的实现
+
+**每个应用都对应一个Share Client，每一个SharedClient对象包含了至多31个SharedBufferStack，而每一个SharedBufferStack都对应一个Android应用程序进程中的一个Surface。**
+
+```c++
+class SharedClient
+{
+public:
+    SharedClient();
+    ~SharedClient();
+    ......
+private:
+    ......
+SharedBufferStack surfaces[ SharedBufferStack::NUM_LAYERS_MAX ]; 
+ //NUM_LAYERS_MAX的值等于31
+};
+```
+
+
+
+```c++
+class SharedBufferStack
+{ 
+public:
+    // When changing these values, the COMPILE_TIME_ASSERT at the end of this
+    // file need to be updated.
+    static const unsigned int NUM_LAYERS_MAX  = 31;
+    //表示一个Android应用程序最多可以有多少个Layer，一个Layer理解为一个Surface。
+    static const unsigned int NUM_BUFFER_MAX  = 16;
+    //表示一个SharedBufferStack至多可以有NUM_BUFFER_MAX个UI元数据缓冲区。
+    static const unsigned int NUM_BUFFER_MIN  = 2;
+    //表示一个SharedBufferStack至少要有UM_BUFFER_MIN个UI元数据缓冲区。
+    static const unsigned int NUM_DISPLAY_MAX = 4;
+    // Android系统至多支持4个显示屏。
+ 
+    ......
+ 
+    struct SmallRect {
+        uint16_t l, t, r, b;
+    };
+ 
+   struct FlatRegion {
+        static const unsigned int NUM_RECT_MAX = 5;
+        uint32_t    count;
+        SmallRect   rects[NUM_RECT_MAX];
+    };
+ 
+    struct BufferData {
+        FlatRegion dirtyRegion; //描述一个Surface需要更新的区域，即裁剪区域
+        SmallRect  crop;		//描述一个Surface的纹理坐标
+        uint8_t transform;		//描述一个Surface的旋转方向
+        uint8_t reserved[3];	//reserved是保留给以后使用的
+    };
+ 
+    SharedBufferStack();
+    ......
+    status_t setDirtyRegion(int buffer, const Region& reg);
+    status_t setCrop(int buffer, const Rect& reg);
+    status_t setTransform(int buffer, uint8_t transform);
+    Region getDirtyRegion(int buffer) const;
+    Rect getCrop(int buffer) const;
+    uint32_t getTransform(int buffer) const;
+ 
+    // these attributes are part of the conditions/updates
+    volatile int32_t head;         // server's current front buffer
+    volatile int32_t available;    // 空闲UI元数据缓冲区的个数；
+    volatile int32_t queued;       // 使用了的UI元数据缓冲区的个数，即那些在排队等待											   // SurfaceFlinger服务使用的UI元数据缓冲区。
+    ......
+    // not part of the conditions
+    ......
+    volatile int8_t index[NUM_BUFFER_MAX];
+    ......
+ 
+    int8_t      headBuf;        // last retired buffer
+    ......
+    BufferData  buffers[NUM_BUFFER_MAX];   
+};
+```
+
+
+
+
+
+## 五、应用程序请求SurfaceFlinger创建Surface
+
+我们可以将Surface理解为一个**绘图表面**，**Android应用程序负责往这个绘图表面填内容，而SurfaceFlinger服务负责将这个绘图表面的内容取出来，并且渲染在显示屏上。**
+
+当Android应用程序请求SurfaceFlinger服务创建一个Surface的时候：**在SurfaceFlinger服务这一侧，**创建一个Layer对象、一个Layer::SurfaceLayer对象和一个SharedBufferServer对象；**在Android应用程序这一侧，**创建一个SurfaceControl对象、一个Surface对象和一个SharedBufferClient对象；
+
+
+
+### 1. 从应用程序侧理解Surface
+
+在Android应用程序这一侧，每一个绘图表面都使用一个Surface对象来描述，每一个Surface对象都是由一个**SurfaceControl**对象来创建。
+
+1. **SurfaceControl类的成员变量mClient**是一个类型为SurfaceComposerClient的强指针，它指向了Android应用程序进程中的一个**SurfaceComposerClient**单例对象。
+
+2. **SurfaceControl类的成员变量mSurface**是一个类型为ISurface的强指针，它指向了一个类型为BpSurface的Binder代理对象，而这个Binder代理对象引用的是一个**Layer::SurfaceLayer**对象。
+
+   当Android应用程序请求SurfaceFlinger服务创建一个绘图表面的时候，SurfaceFlinger服务就会在内部创建一个Layer::SurfaceLayer对象，并且将这个Layer::SurfaceLayer对象的一个Binder代理对象返回来给Android应用程序，然后Android应用程序再将这个Binder代理对象保存在一个SurfaceControl对象的成员变量mSurface中。
+
+3. **SurfaceControl类的成员变量mSurfaceData**是一个类型为Surface的强指针，它指向了一个Surface对象。
+
+   Surface类就是用来在Android应用程序这一侧描述绘图表面的，它的成员变量mSurface与它的宿主类SurfaceControl的成员变量mSurface指向的是同一个Binder代理对象，即它们都引用了在SurfaceFlinger服务内部所创建的一个类型为Layer::SurfaceLayer的Binder本地对象。
+
+   **Surface类的成员变量mClient**指向了Android应用程序进程中的一个SurfaceClient单例对象。Android应用程序就是通过它来请求SurfaceFlinger服务创建共享UI元数据的，并且可以通过它来请求SurfaceFlinger服务渲染一个绘图表面。
+
+   **Surface类的成员变量mSharedBufferClient**指向了一个SharedBufferClient对象。SharedBufferClient类是用来在Android应用程序这一侧描述一个UI元数据缓冲区堆栈的，即在Android应用程序中，每一个绘图表面，即一个Surface对象，都关联有一个UI元数据缓冲区堆栈。
+
+
+
+   ### 2. 从SurfaceFlinger服务这一侧理解Surface
+
+   在SurfaceFlinger服务这一侧，绘图表面使用Layer类来描述。
+
+   1. **Layer类内部的成员变量mUserClientRef**指向了一个ClientRef对象，这个ClientRef对象内部有一个成员变量mControlBlock，它指向了一个SharedBufferServer对象。
+
+      SharedBufferServer类是用来在SurfaceFlinger服务这一侧描述一个UI元数据缓冲区堆栈的，即在SurfaceFlinger服务中，每一个绘图表面，即一个Layer对象，都关联有一个UI元数据缓冲区堆栈。
+
+2. **LayerBaseClient类（ Layer类继承了LayerBaseClient类）内部有一个类型为LayerBaseClient::Surface的弱指针**，它引用了一个Layer::SurfaceLayer对象。这个Layer::SurfaceLayer对象是一个Binder本地对象，它是SurfaceFlinger服务用来与Android应用程序建立通信的，以便可以共同维护一个绘图表面。
+
+   **Layer::SurfaceLayer类**继承了LayerBaseClient::Surface类，**Layer::SurfaceLayer类实现了ISurface接口**，而Android应用程序就是通过这个接口来和SurfaceFlinger服务共同维护一个绘图表面。
+
+3. Android应用程序就是通过ISurface接口的成员函数**requestBuffer**来请求SurfaceFlinger服务为它的一个绘图表面分配一个图形缓冲区的，这个图形缓冲区使用一个GraphicBuffer对象来描述。
+
+
+
+### 3. SharedBufferServer和SharedBufferClient
+
+综上所述，我们可以知道，一个绘图表面，在SurfaceFlinger服务和Android应用程序中分别对应有一个Layer对象和一个Surface对象，这两个对象在内部分别使用一个SharedBufferServer对象和一个SharedBufferClient对象来描述这个绘图表面的UI元数据缓冲堆栈。
+
+SharedBufferServer类和SharedBufferClient类均是从SharedBufferBase类继承下来，在基类SharedBufferBase中，有三个成员变量mSharedClient、mSharedStack和mIdentity。
+
+* 成员变量**mSharedClient**指向一块UI元数据缓冲区，即一个SharedClient对象；
+
+* 成员变量**mSharedStack**指向一个UI元数据堆栈，即一个SharedBufferStack对象；
+
+* 成员变量**mIdentity**用来描述一个绘图表面的ID。
+
+
+
+### 4. SharedBufferClient和SharedBufferServer
+
+
+
+#### SharedBufferClient
+
+在SharedBufferClient类中，有三个成员变量mNumBuffers、tail和queue_head.
+
+在Android应用程序这一侧，当它需要渲染一个Surface时，它就会首先找到对应的SharedBufferClient对象，然后再调用它的成员函数dequeue来请求分配一个UI元数据缓冲区。
+
+有了这个UI元数据缓冲区之后，Android应用程序再调用这个SharedBufferClient对象的成员函数setDirtyRegion、setCrop和setTransform来设置对应的Surface的裁剪区域、纹理坐标以及旋转方向。
+
+此外，Android应用程序还会请求SurfaceFlinger服务为这个Surface分配一个图形缓冲区，以便可以往这个图形缓冲区写入实际的UI数据。
+
+最后，Android应用程序就可以调用这个SharedBufferClient对象的成员函数queue把前面已经准备好了的UI元数据缓冲区加入到它所描述的一个UI元数据缓冲区堆栈的待渲染队列中，以便SurfaceFlinger服务可以在合适的时候对它进行渲染。
+
+
+
+#### SharedBufferServer
+
+当SurfaceFlinger服务需要渲染一个Surface的时候，它就会找到对应的一个SharedBufferServer对象，然后调用它的成员函数getQueueCount来检查它所描述的一个UI元数据缓冲区堆栈的待渲染队列的大小。
+
+如果这个大小大于0，那么SurfaceFlinger服务就会继续调用它的成员函数retireAndLock来取出队列中的第一个UI元数据缓冲区，以及调用它的成员函数getDirtyRegion、getCrop和getTransform来获得要渲染的Surface的裁剪区域、纹理坐标和旋转方向。
+
+最后，SurfaceFlinger服务就可以结合这些信息来将保存这个Surface的图形缓冲区中的UI数据渲染在显示屏中。
+
+SharedBufferServer类的另外一个成员变量**mBufferList**指向了一个BufferList对象，这个BufferList对象是用来管理SharedBufferServer类所描述的一个UI元数据缓冲区堆栈。
+
+
+
+### 5. 创建Surface代码调用流程
+
+**Step 1. SurfaceComposerClient.createSurface**
+
+* 形参里进行一些配置；
+
+* 参数pid用来描述当前进程的PID，
+
+* 参数display的值等于0，表示要在第一个显示屏上创建一个Surface，
+
+* 参数w和h表示要创建的Surface的宽度和高度，它们的值刚好等于第一个显示屏的宽度和高度，
+
+* 参数format的值等于PIXEL_FORMAT_RGB_565，表示要创建的Surface的像素格式为PIXEL_FORMAT_RGB_565，即每一个点使用2个字节来描述，其中，R、G和B分量分别占5位、6位和5位，
+
+* 参数flags是一个默认参数，它等于默认值0，表示要创建的Surface的用途。
+
+SurfaceComposerClient类的成员函数createSurface调用成员变量mClient的成员函数createSurface请求SurfaceFlinger服务创建一个Surface之后，就得到了一个类型为BpSurface的Binder代理对象surface。
+
+1. 从前面的描述可以知道，Binder代理对象surface引用了在SurfaceFlinger服务这一侧的一个Layer::SurfaceLayer对象。
+
+2. 此外，SurfaceComposerClient类的成员函数createSurface还得到了一个surface_data_t对象data，它里面包含了刚才所创建的一个Surface的信息，例如，宽度、高度、像素格式和ID值等。
+3. 最后，SurfaceComposerClient类的成员函数createSurface就将SurfaceFlinger服务返回来的Binder代理对象surface和surface_data_t对象data封装成一个SurfaceControl对象result，并且返回给调用者。
+
+
+
+**Step 2. Client.createSurface**
+
+Client类的成员变量mFlinger指向了SurfaceFlinger服务，因此，接下来就会调用SurfaceFlinger类的成员函数createSurface来创建一个Surface。
+
+
+
+**Step 3. SurfaceFlinger.createSurface**
+
+1. 调用SurfaceFlinger类的成员函数createNormalSurface来在显示屏上创建一个Layer。
+2. 创建的Layer保存在变量layer中，接下来SurfaceFlinger类的成员函数createNormalSurface会调用；另外一个成员函数addClientLayer来将它保存在内部的一个列表中，接着再调用前面所创建的Layer的成员函数getSurface来获得一个Layer::SurfaceLayer对象surfaceHandle。
+3. 在将Layer::SurfaceLayer对象surfaceHandle的一个Binder代理对象返回给Android应用程序之前，SurfaceFlinger类的成员函数createNormalSurface还会以它的一个IBinder接口为关键字，将前面所创建的Layer保存在SurfaceFlinger类的成员变量mLayerMap所描述的一个Map中，这样就可以将一个Layer::SurfaceLayer对象surfaceHandle与它的宿主Layer对象关联起来。
+
+
+
+**Step 4. SurfaceFlinger.createNormalSurface**
+
+1. 函数开头的switch语句判断要创建的Surface是否要使用透明色。如果要使用的话，那么就将参数format的值修改为PIXEL_FORMAT_RGBA_8888。
+
+   另一方面，如果要创建的Surface不需要使用透明色，那么就将参数format的值修改为PIXEL_FORMAT_RGB_565或者PIXEL_FORMAT_RGBX_8888，取决于是否定义了宏NO_RGBX_8888。
+
+2. 函数接下来创建了一个Layer对象，并且调用这个Layer对象的成员函数setBuffers来在内部创建一个Layer::SurfaceLayer对象，最后就将这个Layer对象返回给调用者。
+
+
+
+ **Step 5. new Layer**
+
+ Layer类的构造函数只是执行一些简单的初始化工作。
+
+
+
+ **Step 6. Layer.setBuffers**
+
+ayer类的成员函数setBuffers在进行一些配置操作，最后就创建了一个SurfaceLayer对象，并且保存成员变量mSurface中。
+
+
+
+**Step 7. new SurfaceLayer**
+
+SurfaceLayer类的构造函数的实现很简单，它只是使用参数flinger以及owner来初始其父类Surface，其中，参数flinger指向的是SurfaceFlinger服务，而参数owner指向的是正在创建的SurfaceLayer对象的宿主Layer对象。
+
+这一步执行完成之后，  沿着调用路径返回到SurfaceFlinger类的成员函数createSurface中，这时候就创建好一个Layer对象及其内部的一个SurfaceLayer对象
+
+
+
+**Step 8. SurfaceFlinger.addClientLayer**
+
+参数client指向了一个Client对象，它是用来描述当前正在请求SurfaceFlinger服务的一个Android应用程序的；
+
+参数lbc指向的是我们在前面Step 4中所创建的一个Layer对象。
+
+函数首先调用参数client所指向的一个Client对象的成员函数attachLayer来关联参数lbc所指向的一个Layer对象，以表示参数lbc所指向的一个Layer对象是由参数client所指向的一个Client对象所描述的一个Android应用程序请求创建的，接下来再调用SurfaceFlinger类的成员函数addLayer_l来将参数lbc所指向的一个Layer对象保存在SurfaceFlinger的内部。
+
+
+
+ **Step 9. Client.attachLayer**
+
+Client类的成员变量mNameGenerator是用来生成Surface名称的，它的初始值等于1，每当Android应用程序请求SurfaceFlinger服务为它创建一个Surface，SurfaceFlinger服务就会将对应的Client对象的成员变量mNameGenerator的值增加1，这样就可以依次得到名称等于1、2、3......的Surface。
+
+ 为正在创建的Surface生成好名称name之后，Client类的成员函数attachLayer就以变量name为关键字，将用来描述正在创建的Surface的一个Layer对象layer保存Client类的成员变量mLayers所描述的一个Map中。从这里就可以知道，一个Android应用程序所创建的Surface，都保存在与它所对应的一个Client对象的成员变量mLayers中。
+
+**step 10. SurfaceFlinger.addLayer_l**
+
+SurfaceFlinger类的成员变量mCurrentState指向了一个State对象，这个State对象内部有一个成员变量layersSortedByZ，它用来描述一个类型为LayerVector的向量，用来保存SurfaceFlinger服务所创建的每一个Layer，并且这些Layer是按照Z轴坐示来排列的。这样，SurfaceFlinger服务在渲染Surface的时候，就可以根据这个向量来计算可见性。
+
+**Step 11. LayerBaseClient.getSurface**
+
+执行完上述步骤，回到SurfaceFlinger类的成员函数createSurface中，这时候SurfaceFlinger服务就将前面所创建的一个Layer对象保存好在内部了，接下来就会调用这个Layer对象的成员函数getSurface来获得在前面Step 6中所创建的一个SurfaceLayer对象，以便可以将它的一个Binder代理对象返回请求Surface的Android应用程序。
+
+Layer类的成员函数getSurface是从父类LayerBaseClient继承下来的，
+
+如果没有初始化LayerBaseClient类的成员变量mClientSurface，要么LayerBaseClient类的成员变量mClientSurface所指向的一个Surface子类对象已经被销毁了。在这种情况下，函数就会调用由其子类来重写的成员函数createSurface来获得一个Surface子类对象，并且保存在成员变量mClientSurface中。
+
+
+
+**Step 12. Layer.createSurface**
+
+```c++
+sp<LayerBaseClient::Surface> Layer::createSurface() const
+{
+    return mSurface;
+}
+```
+
+从前面的Step 6可以知道， Layer类的成员变量mSurface已经指向了一个SurfaceLayer对象，因此，函数就可以直接将它返回给调用者。
+
+回到SurfaceFlinger类的成员函数createSurface中，这时候SurfaceFlinger服务就完成了Android应用程序所请求创建的Surface了，最后就会将用来描述这个Surface的一个SurfaceLayer对象的一个Binder代理对象返回Android应用程序，以便Android应用程序可以将它封装成一个SurfaceControl对象.
+
+
+
+**Step 13. new SurfaceControl**
+
+SurfaceControl类的构造函数的实现很简单，它只是对各个成员变量进行初始化，其中，我们需要重点关注的是，SurfaceControl类的成员变量mSurface指向的是一个类型为BpSurface的Binder代理对象，这个Binder代理对象引用的是由SurfaceFlinger服务所创建的一个类型为SurfaceLayer的Binder本地对象。
+
+
+
+
+
+**Step 14. SurfaceControl.getSurface**
+
+SurfaceControl类的成员函数getSurface第一次被调用时，成员变量mSurfaceData的值等于0，因此，函数接下来就会创建一个Surface对象，并且保存在成员变量mSurfaceData中。
+
+**Step 15. new Surface**
+
+**Surface类的成员变量mBufferMapper**指向了一个GraphicBufferMapper对象，它是用来将分配到的图形缓冲区映射到Android应用程序进程的地址空间的.
+
+**Surface类的成员变量mClient**指向了Android应用程序进程中的一个SurfaceClient单例。这个SurfaceClient单例是有来创建Android应用程序与SurfaceFlinger服务的共享UI元数据的。当SurfaceClient类的成员函数getInstance第一次在进程中被调用时，Android应用程序便会请求SurfaceFlinger服务创建这块共享UI元数据。
+
+Surface类的成员变量mSharedBufferClient指向了一个SharedBufferClient对象。文章开始时提到，SharedBufferClient是用来在Android应用程序这一侧描述一个Surface的UI元数据缓冲区堆栈的。
+
+Surface类的成员变量mSurface指向了一个类型为BpSurface的Binder代理对象。从Surface类的构造函数就可以看出，这个Binder代理对象引用的是在前面Step 6中创建的一个SurfaceLayer对象。
+
+Surface类的其余成员变量mIdentity、mFormat、mFlags、mWidth和mHeight分别用来描述一个Surface的ID、像素格式、用途、宽度和高度。
+
+Surface类的构造函数接下来调用另外一个成员函数init进一步执行初始化的工作。
+
+
+
+**Step 16. Surface.init**
+
+这个函数的初始化工作分为两部分。第一部分初始化工作是与OpenGL库相关的，主要就是设置OpenGL指定的一系列回调接口，以及设置设备显示屏信息。 第二部分初始化工作是与UI元数据缓冲区相关。
+
+Surface类的成员变量mSharedBufferClient指向了一个SharedBufferClient对象，用来描述一个UI元数据缓冲区堆栈，它的创建过程是最重要的，因此，接下来我们就详细分析这个过程。
+
+1. Surface类的成员函数init首先调用成员变量mClient的成员函数getTokenForSurface来获得成员变量mSurface所描述的一个Surface的token值。有了这个token值之后，接下就可以创建一个SharedBufferClient对象，并且保存在 Surface类的成员变量mSharedBufferClient中。
+2. Surface类的成员变量mClient指向的是一个SurfaceClient对象，SurfaceClient类的成员函数getTokenForSurface实际上是调用了其成员变量mClient所指向的一个类型为BpSurfaceComposerClient的Binder代理对象的成员函数getTokenForSurface来请求SurfaceFlinger服务返回一个Surface的token值。由于这个Binder代理对象引用的是一个类型为UserClient的Binder本地对象，这个Binder本地对象是运行在SurfaceFlinger服务这一侧的。
+
+
+
+
+
+**Step 17. UserClient.getTokenForSurface**
+
+UserClient类的成员变量mFlinger指向了SurfaceFlinger服务，函数首先调用它的成员函数getLayer来获得参数sur所指向的SurfaceLayer对象的宿主Layer对象layer，接着调用这个Layer对象layer的成员函数getToken来获得它的token值。如果这个token值大于等于0，那么就说明已经为Layer对象layer分配过token值了，即已经为参数sur所描述的Surface分配过token值了。在这种情况下，就直接将该token值返回给Android应用程序。否则的话，UserClient类的成员函数getTokenForSurface接下来就需要为参数sur所描述的Surface分配一个token值。
+
+UserClient类的成员变量mBitmap是一个int32_t值，它是用来为Android应用程序的Surface分配Token值的，即如果它的第n位等于1，那么就表示值等于n的Token已经被分配出去使用了。UserClient类的成员函数getTokenForSurface使用一个while循环来在成员变量mBitmap中从低位到高位找到一个值等于0的位，接着再将位所在的位置值作为参数sur所描述的一个Surface的token值，最后还会将这个token值设置到Layer对象layer里面去，这是通过调用Layer类的成员函数setToken来实现的。
+
+**Step 18. Layer.setToken**
+
+里面会进行SharedBufferServer对象的创建；
+
+
+
+**Step 19. new SharedBufferServer**
+SharedBufferServer类的构造函数主要是用来初始它所描述的一个UI元数据缓冲区堆栈的，这个UI元数据缓冲区堆栈是通过其父类的成员变量mSharedStack所指向的一个SharedBufferStack对象来描述的。
+
+返回到前面的Step 16中，即Surface类的成员函数init中，这时候Android应用程序就获得了正在创建的Surface的token值，接下来就可以以这个token值为参数，来创建一个SharedBufferClient对象了。
+
+
+
+**Step 20. new SharedBufferClient**
+
+```cpp
+SharedBufferClient::SharedBufferClient(SharedClient* sharedClient,
+        int surface, int num, int32_t identity)
+    : SharedBufferBase(sharedClient, surface, identity),
+      mNumBuffers(num), tail(0)
+{
+    SharedBufferStack& stack( *mSharedStack );
+    tail = computeTail();
+    queued_head = stack.head;
+}
+```
+
+SharedBufferClient类的构造函数主要是用来初始化成员变量tail和queued_head的值。
+
+这里的参数sharedClient指向了一个SharedClient对象，这个SharedClient对象与在前面Step 18中用来创建SharedBufferServer对象的SharedClient对象描述的是同一块匿名共享内存，而且这里的参数surface与在前面Step 18中用来创建SharedBufferServer对象的token的值是相等的，这意味着这一步所创建的SharedBufferClient对象与前面Step 19所创建的SharedBufferServer对象描述的是同一个SharedBufferStack对象，即同一个UI元数据缓冲区堆栈，并且这个UI元数据缓冲区堆栈已经在前面的Step 19中初始化好了。
+
+
+
+
+
+## 六、SurfaceFlinger服务渲染Surface的过程
+
+我们将在Android应用程序这一侧所创建的一个Surface的父类ANativeWindow的OpenGL回调函数dequeueBuffer和queueBuffer分别设置为Surface类的静态成员函数dequeueBuffer和queueBuffer。
+
+OpenGL在绘图之前，就首先会调用Surface类的静态成员函数dequeueBuffer来获得一个空闲的UI元数据缓冲区，接着请求SurfaceFlinger服务为这个UI元数据缓冲区分配一个图形缓冲区。有了图形缓冲区之后，OpengGL库就可以往里面填入UI数据。在往图形缓冲区填入UI数据的同时，OpenGL库也会往前面获得的UI元数据缓冲区填入当前正在操作的Surface的裁剪区域、纹理坐标和旋转方向等信息。
+
+再接下来，OpenGL库就会调用Surface类的静态成员函数queueBuffer来将前面已经填好了数据的UI元数据缓冲区添加到当前正在操作的Surface的UI元数缓冲区堆栈的待渲染队列中。
+
+最后，Android应用程序就会请求SurfaceFlinger服务将当前正在操作的Surface的UI数据渲染到设备显示屏去。
+
+
+
+### 1. Surface类的静态成员函数dequeueBuffer的实现
+
+**Step 1. Surface.dequeueBuffer**
+
+函数首先调用Surface类的成员变量mSharedBufferClient所指向的一个SharedBufferClient对象的成员函数dequeue来从UI元数据缓冲区堆栈中获得一个空闲的缓冲区。获得的空闲缓冲区使用一个编号来描述，这个编号保存在变量bufIdx中。
+
+函数再接下来调用Surface类的另外一个成员函数needNewBuffer来判断之前是否已经为编号为bufIdx的UI元数据缓冲区分配过图形缓冲区
+
+由于UI元数据缓冲区堆栈中的缓冲区是循环使用的。当一个UI元数据缓冲区第一次被使用的时候，应用程序就会请求SurfaceFlinger服务为它分配一个图形缓冲区。这个图形缓冲区使用完成之后，就会被应用程序缓存起来，以便后面可以继续使用。但是这个图形缓冲区可能会被得无效，例如，与它对应的Surface的大小和用途等信息发生改变之后，该图形缓冲区就会变得无效了，因为它在分配的时候，是按照既定的大小和用途来分配的。
+
+这个函数首先调用Surface类的成员变量mSharedBufferClient所指向的一个SharedBufferClient对象的成员函数needBuffer来验证编号为bufIdx的UI元数据缓冲区所对应的图形缓冲区信息是否发生了变化。如果发生了变化，那么变量needNewBuffer的值就会等于true，表示要重新为编号为bufIdx的UI元数据缓冲区分配新的图形缓冲区。
+
+最后，Surface类的非静态成员函数dequeueBuffer就将得到的图形缓冲区的地址保存输出参数buffer中，以便OpenGL库可以在上面填入UI数据。
+
+**Step 2. SharedBufferClient.dequeue**
+
+SharedBufferClient类的成员变量tail指向了一个UI元数据缓冲区堆栈的空闲缓冲区列表的尾部。当这个UI元数据缓冲区堆栈的可用空闲缓冲区的数量available的值大于0的时候，应用程序就可以从它的空闲缓冲区列表的尾部分配一个绘冲区出来使用。
+
+返回到Step 1中，即Surface类的成员函数dequeueBuffer中，这时候应用程序就为当前正在绘制的**Surface获得了一个空闲UI元数据缓冲区**，接下来就会继续调用Surface类的成员函数**getBufferLocked来为该空闲UI元数据缓冲区分配图形缓冲区**。
+
+**Step 3.  Surface.getBufferLocked**
+
+Surface类的成员变量mSurface指向了一个类型为BpSurface的Binder代理对象，这个Binder代理对象引用了运行在SurfaceFlinger服务一侧的一个类型为SurfaceLayer的Binder本地对象。函数首先将这个成员变量保存在变量s中，后面会通过它来向SurfaceFlinger服务为编号为index的空闲UI元数据缓冲区分配一个图形缓冲区。
+
+在请求SurfaceFlinger服务为编号为index的空闲UI元数据缓冲区分配图形缓冲区之前，函数还会检查在Surface类的成员变量mBuffers中是否存在一个与编号为index的空闲UI元数据缓冲区对应的图形缓冲区。
+
+如果存在的话，就需要将这个图形缓冲区从应用程序进程的地址空间注销掉，因为这个图形缓冲区已经变成无效了。Surface类的成员函数getBufferMapper的返回值是一个GraphicBufferMapper对象，通过调用这个GraphicBufferMapper对象的成员函数unregisterBuffer就可以注销一个指定的图形缓冲区。
+
+函数接下来就请求变量s所指向的一个BpSurface对象的成员函数requestBuffer请求SurfaceFlinger服务为编号为index的空闲UI元数据缓冲区分配一个图形缓冲区，这个缓冲区保存在变量buffer中。应用程序得到图形缓冲区buffer之后，还需要将它注册到本进程的地址空间之后，才能使用，这是通过调用GraphicBufferMapper类的成员函数registerBuffer来实现的。
+
+接下来，函数就将图形缓冲区buffer保存在一个GraphicBuffer引用currentBuffer中。由于currentBuffer引用的是Surface类的成员变量mBuffers的第index个图形缓冲区，因此，前面相当于将图形缓冲区buffer保存在Surface类的成员变量mBuffers的第index个位置中，以便以后可以重复利用。
+
+
+**Step 4. SurfaceLayer.requestBuffer**
+
+函数首先调用SurfaceLayer类的成员函数getOwner来获得当前正在处理的一个SurfaceLayer对象的宿主Layer对象，接着再调用这个Layer对象的成员函数requestBuffer来执行分配图形缓冲区的操作。
+
+
+
+**Step 5. Layer.requestBuffer**
+
+我们首先明确一下各个函数参数的含义。参数index用来描述一个UI元数据缓冲区的编号，参数reqWidth、reqHeight、reqFormat和usage分别表示要分配的图形缓冲区的宽度、高度、像素格式和用途。函数首先检查各个参数的合法性，即参数reqWidth、reqHeight和reqFormat不能为负数，并且参数reqWidth和reqHeight不能同时等于0。
+
+最后，Layer类的成员函数requestBuffer就会分配好的图形缓冲区，即GraphicBuffer对象buffer返回给应用程序。
+
+
+
+**Step 6. new GraphicBuffer**
+
+GraphicBuffer类的构造函数最重要的是调用另外一个成员函数initSize来初始化即将要分配的图形缓冲区。
+
+
+
+**Step 7. GraphicBuffer.initSize**
+
+函数首先获得一个GraphicBufferAllocator对象，然后再调用这个GraphicBufferAllocator对象的成员函数alloc来分配一块指定大小、像素格式以及用用途的图形缓冲区。分配好的图形缓冲的句柄值最终就保存在GraphicBuffer类的成员变量handle中。
+
+GraphicBufferAllocator类是用来分配图形缓冲区的，我们就继续分析它的成员函数alloc的实现。
+
+
+
+**Step 8. GraphicBufferAllocator.alloc**
+
+GraphicBufferAllocator类的成员变量mAllocDev指向了一个alloc_device_t结构体，用来描述HAL层的Gralloc模块中的一个gralloc设备。
+
+GraphicBufferAllocator类的构造函数首先调用函数hw_get_module来加载ID值等于GRALLOC_HARDWARE_MODULE_ID的HAL模块，即加载HAL层中的Gralloc模块，目的是为了接下来调用函数gralloc_open来打开里面的gralloc设备，并且将这个打开的gralloc设备保存在GraphicBufferAllocator类的成员变量mAllocDev中。
+
+
+**Step 9. alloc_device_t.alloc**
+
+Gralloc模块模块中的函数gralloc_alloc有一个参数usage，当它的GRALLOC_USAGE_HW_FB位等于1的时候，函数gralloc_alloc就会直接在硬件帧缓冲区上分配一个图形缓冲区，否则的话，就会在匿名共享内存中分配一个图形缓冲区。
+
+由于整个系统在硬件上就只有一个帧缓冲区，它是由SurfaceFlinger服务来统一管理的，即只有SurfaceFlinger服务使用的图形缓冲区才可以在上面分配，否则的话，随便一个应用程序进程都可以在上面分配图形缓冲区来使用，这个帧缓冲区的管理就乱套了。应用程序进程使用的图形缓冲区一般都是在匿名共享内存里面分配的，这个图形缓冲区填好数据之后，就会再交给SurfaceFlinger服务来合成到硬件帧缓冲区上去渲染。因此，从前面Step 1传过来给函数gralloc_alloc的参数usage的GRALLOC_USAGE_HW_FB位会被设置为0，以便可以在匿名共享内存中分配一个图形缓冲区。
+
+这一步执行完成之后，应用程序所请求的图形缓冲区就分配完成了，回到前面的Step 5中，即Layer类的成员函数requestBuffer中，接下来就会调用BufferManager类的成员函数attachBuffer来设置这个图形缓冲区的编号，以便它可以与一个UI元数据缓冲区关联起来的。关联好之后，应用程序在请求SurfaceFlinger服务渲染一个Surface时，只需要指定一个UI元数据缓冲区的编号，SurfaceFlinger服务就可以根据这个编号来找到对应的图形缓冲区，进而把这个图形缓冲区的内容渲染到硬件帧缓冲区上去，即渲染到设备显示屏上去。
+
+**Step 10. BufferManager.attachBuffer**
+
+BufferManager类的成员函数attachBuffer的实现，就是将编号为index的UI元数据缓冲区与参数buffer所描述的图形缓冲区关联起来。
+
+这一步执行完成之后，回到前面的Step 5中，即Layer类的成员函数requestBuffer中，接下来就会将分配好的图形缓冲区返回给应用程序，即返回到前面的Step 3中去，这时候应用程序就继续调用GraphicBufferMapper类的成员函数registerBuffer来将获得的图形缓冲区注册到当前进程的地址空间去。
+
+**Step 11. GraphicBufferMapper.registerBuffer**
+GraphicBufferAllocator类的构造函数首先调用函数hw_get_module来加载ID值等于GRALLOC_HARDWARE_MODULE_ID的HAL模块，即加载HAL层中的Gralloc模块，目的是为了接下来调用函数gralloc_open来打开里面的gralloc设备，并且将这个打开的gralloc设备保存在GraphicBufferAllocator类的成员变量mAllocDev中。
+
+GraphicBufferMapper类的构造函数首先调用函数hw_get_module来加载ID值等于GRALLOC_HARDWARE_MODULE_ID的模块，就可以将Gralloc模块加载到应用程序进程中来。从前面Android帧缓冲区（Frame Buffer）硬件抽象层（HAL）模块Gralloc的实现原理分析一文可以知道，Gralloc模块是使用一个gralloc_module_t结构体来描述的，因此，GraphicBufferMapper类的构造函数最终就可以将加载得到的模块module转换为一个gralloc_module_t结构体，并且保存在GraphicBufferMapper类的成员变量mAllocMod中。
+
+
+**Step 12. gralloc_module_t.registerBuffer**
+
+Gralloc模块的成员函数registerBuffer被设置为Gralloc模块中的函数gralloc_register_buffer。Gralloc模块模块中的函数gralloc_register_buffer主要就是将一块指定的图形缓冲区映射到当前进程的地址空间来。在我们这个情景中，就是映射到应用程序进程的地址空间来。
+
+这一步执行完成之后，应用程序请求SurfaceFlinger服务为一个空闲的UI元数据缓冲区分配一个图形缓冲区的过程就分析完成了。从分析的过程可以知道，这个图形缓冲区指向的是一块匿名共享内存，最初是在SurfaceFlinger服务这一侧分配的，然后再返回给应用程序进程这一侧，并且会被映射到应用程序进程的地址空间来。这样，SurfaceFlinger服务和应用程序就可以在各自的地址空间中访问这个图形缓冲区，其中，应用程序访问这个图形缓冲区的目的是往里面写入UI数据，而SurfaceFlinger服务访问这个图形缓冲区的目的是将里面的UI数据读取出来渲染。
+
+
+
+### 2. Surface类的静态成员函数queueBuffer的实现
+
+该模块研究应用程序是如何将一块已经填好了数据的UI元数据缓冲区添加到当前正在绘制的Surface的UI元数缓冲区堆栈的待渲染队列中去。
+
+**Step 1. Surface.queueBuffer**
+
+函数首先调用另外一个静态成员函数getSelf来将它转换为一个Surface对象self，接着再调用这个Surface对象self的成员函数queueBuffer将一个UI元数据缓冲区加入到待渲染队列中去，其中，要加入到待渲染队列中去的UI元数据缓冲区就是使用参数buffer来描述的。
+
+如前所述，参数buffer描述的是一个图形缓冲区，它的实际类型为GraphicBuffer，因此，函数就可以调用GraphicBuffer的静态成员函数getSelf来将它转换为一个GraphicBuffer对象，接着函数还调用Surface类的成员函数getBufferIndex来获得参数buffer所描述的一个图形缓冲区的编号bufIdx。这个编号是用来关联一个UI元数据缓冲区。在前面分析空闲UI元数据缓冲区及其图形缓冲区的分配过程的Step 3中提到，应用程序请求SurfaceFlinger服务为一个UI元数据缓冲区分配了一个图形缓冲区时，就会将这个UI元数据缓冲区的编号设置到这个图形缓冲区里面去。
+
+Surface类的成员变量mSharedBufferClient指向了一个SharedBufferClient对象，用来描述当前正在绘制的Surface的UI元数据缓冲区堆栈，接下来函数就会调用它的成员函数queue来将前面获得的一个编号为bufIdx的UI元数据缓冲区加入到它的待渲染队列中去。不过，在加入这个编号为bufIdx的UI元数据缓冲区之前，函数还会分别调用成员变量mSharedBufferClient的成员函数setTransform、setCrop和setDirtyRegion来设置它的旋转方向、纹理坐标和裁剪区域等信息。这些信息分别保存在Surface类的成员变量mNextBufferTransform、mNextBufferCrop和mDirtyRegion中。注意，Surface类的成员变量mNextBufferTransform和mNextBufferCrop是由OpenGL库通过调用Surface类的成员函数perform来设置。从前面Android应用程序请求SurfaceFlinger服务创建Surface的过程分析一文可以知道，应用程序在请求SurfaceFlinger服务创建一个绘图表面的时候，会将用来描述这个绘图表面的一个Surface对象的成员函数perform设置为OpenGL库在画图的过程需要调用到的一个回调接口peform，这样做的目的就是为了可以设置绘图表面的元信息。
+
+将编号为bufIdx的UI元数据缓冲区加入到正在绘制的Surface的UI元数据缓冲区堆栈的待渲染队列之后，函数最后就会调用Surface类的成员变量mClient所描述的一个SurfaceClient对象的成员函数signalServer来通知SurfaceFlinger服务来相应的图形缓冲区渲染到设备显示屏上去。
+
+接下来，我们首先分析SharedBufferClient类的**成员函数queue**的实现，以便可以了解一个UI元数缓冲区是如何进入到一个UI元数据缓冲区堆栈的待渲染队列中去的，接着分析SurfaceClient类的**成员函数signalServer**的实现，以便可以了解应用程序是如何请求SurfaceFlinger服务渲染一个Surface的图形缓冲区的。
+
+
+
+**Step 2. SharedBufferClient.queue**
+
+SharedBufferClient类的成员变量mSharedStack是从父类SharedBufferBase继承下来的，它的成员变量index是一个类型为int8_t的数组，而这个数组就是用来描述一个UI元数据缓冲区堆栈。
+
+SharedBufferClient类的成员变量queue_head指向了一个UI元数据缓冲区堆栈的待渲染队列的尾部，所有需要加入到这个待渲染队列的UI元数据缓冲都保存在queue_head的下一个位置上。
+
+参数buf描述的是要加入到当前正在绘制的Surface的UI元数据缓冲区堆栈的待渲染队列的缓冲区的编号，在将这个缓冲区加入到待渲染队列之后，还需要将这个待渲染队列的大小增加1，以便SurfaceFlinger服务可以知道一个Surface当前有多少个图形缓冲区是正在等待被渲染的。
+
+一个UI元数据缓冲区堆栈的待渲染队列的大小保存在一个SharedBufferStack对象的成员变量queued中，而将这个待渲染队列的大小增加1的操作是通过调用用SharedBufferClient类从SharedBufferBase类继承下来的成员函数updateCondition来实现的。
+
+函数首先创建了一个QueueUpdate对象update，然后再以这个QueueUpdate对象update为参数，来调用SharedBufferClient从SharedBufferBase类继承下来的成员函数updateCondition，就可以将当前正在处理的一个UI元数据缓冲区堆栈的待渲染队列的大小增加1了。
+
+就返回到Step 1中，即Surface类的成员函数queueBuffer中，这时候与需要渲染的图形缓冲区所对应的UI元数据缓冲区就加入到当前正在绘制的Surface的UI元数据缓冲区的待渲染队列中去了，接下来，应用程序就会调用SurfaceClient类的成员函数signalServer来请求SurfaceFlinger服务渲染这个Surface。
+
+
+
+
+**Step 3. SurfaceClient.signalServer**
+
+SurfaceClient类的成员变量mComposerService指向了一个实现了ISurfaceComposer接口的Binder代理对象，而这个Binder代理对象引用了系统中的SurfaceFlinger服务，因此，SurfaceClient类的成员函数signalServer实际上就是通过成员变量mComposerService的成员函数signal来通知SurfaceFlinger服务执行渲染Surface的操作。
+
+这一步执行完成之后，就会导致SurfaceFlinger类的成员函数signal被调用，接下来我们继续分析这个成员函数的实现。
+
+
+
+**Step 4. SurfaceFlinger.signal**
+
+ SurfaceFlinger服务是运行在System进程中的一个单独的线程中的。当SurfaceFlinger服务什么也不需要做的时候，它就会在这个线程中睡眠。由于现在有应用程序请求SurfaceFlinger服务执行渲染Surface的操作了，因此，就需要将这个线程唤醒起来。
+
+唤醒SurfaceFlinger服务所运行在的线程的操作是通过调用SurfaceFlinger类的成员函数signalEvent来实现的。当这个线程被唤醒之后，它就会继续执行SurfaceFlinger类的成员函数threadLoop来执行渲染Surface的操作。
+
+从SurfaceFlinger类的成员函数threadLoop开始，SurfaceFlinger服务渲染Surface的图形缓冲区的过程大致需要6步：
+
+1. **SurfaceFlinger.threadLoop**
+
+   在SurfaceFlinger服务中，每一个Surface，或者说每一个Layer，都有自己的一系列图形缓冲区。而对于每一个Surface来说，它们各自需要渲染的图形缓冲区都保存在内部的一个UI元数据缓冲区堆栈的待渲染队列中。当SurfaceFlinger服务需要渲染系统的UI时，首先就会将各个Surface的UI元数据缓冲区堆栈的待渲染队列的缓冲区逐个取出来，并且找到对应的图形缓冲区，接着再将这些图形缓冲区合成在一起渲染到硬件帧缓冲区fb上，最后我们就可以在设备显示屏上看到系统的UI。
+
+   了解了这个背景知识之后，接下来我们就简要描述SurfaceFlinger类的成员函数threadLoop的工作过程：
+
+   （1）在SurfaceFlinger类的成员函数waitForEvent中等待。一旦SurfaceFlinger类的成员函数signalEvent被调用，那么SurfaceFlinger服务所运行的线程就会被唤醒。
+
+   （2）调用SurfaceFlinger类的成员函数handlePageFlip将各个Surface的UI元数据缓冲区堆栈的待渲染队列头部的缓冲区取出来，并且找到对应的图形缓冲区。这些图缓冲区就是接下来要被合成和渲染的。
+
+   （3） 调用SurfaceFlinger类的成员函数handleRepaint来合成第2步得到的图形缓冲区。
+
+   （4）SurfaceFlinger服务使用一个DisplayHardware对象hw来描述系统当前所使用的显示屏，这个DisplayHardware对象hw实际就是用来封装对硬件帧缓冲区fb的访问的，第3步就是将各个图形缓冲区的内容合成到这个DisplayHardware对象hw中去。合成完成之后，就会调用这个DisplayHardware对象hw的成员函数compositionComplete来通知HAL层Gralloc模块中的fb设备。这一步是可选的，即HAL层Gralloc模块中的fb设备可以忽略掉这个合成完成通知。
+
+   （5）调用SurfaceFlinger类的成员函数postFramebuffer来将产须合成好的图形缓冲区渲染到硬件帧缓冲区fb上去。
+
+2. **SurfaceFlinger.handlePageFlip**
+
+      这里我们只关注第2步的实现：
+
+      SurfaceFlinger服务将系统中的各个Surface按照其Z轴大小排列在SurfaceFlinger类的成员变量mDrawingState内部的一个layersSortedByZ列表中。函数首先将这个Surface列表layersSortedByZ取出来，并且调用SurfaceFlinger类的另外一个成员函数lockPageFlip来将各个Surface当前需要渲染的图形缓冲区取出来。
+
+      如果SurfaceFlinger服务确实需要执行渲染图形缓冲区的操作，那么SurfaceFlinger类的成员函数lockPageFlip的返回值就会等于true。在这种情况下，函数接下来主要就是调用SurfaceFlinger类的成员函数computeVisibleRegions来计算需要渲染的各个Surface的可见区域，以便后面可以正确地将它们的UI绘制出来。
+
+      接下来，我们只关注SurfaceFlinger类的成员函数lockPageFlip的实现，以便可以了解SurfaceFlinger服务是如何将各个Surface当前需要渲染的图形缓冲区取出来的。
+
+3. **SurfaceFlinger.lockPageFlip**
+
+   我们只关注SurfaceFlinger类的成员函数lockPageFlip的实现，以便可以了解SurfaceFlinger服务是如何将各个Surface当前需要渲染的图形缓冲区取出来的。
+
+   保存在Surface列表currentLayers中的Surface有可能是一个Layer对象，也有可能一个是LayerBlur对象或者一个LayerDim对象等。这里我们只关心类型为Layer的Surface的图形缓冲区是如何取出来渲染的，这是通过调用Layer类的成员函数lockPageFlip来实现的。
+
+4. **Layer.lockPageFlip**
+
+      Layer类的成员变量mUserClientRef指向了一个ClientRef对象，通过这个ClientRef对象可以获得一个SharedBufferServer对象lcblk。有了SharedBufferServer对象lcblk之后，函数就可以调用它的成员函数retireAndLock来从它所描述的UI元数据缓冲区堆栈的待渲染队列中取出一个缓冲区来，以便接下来可以找到对应的图形缓冲区来渲染。
+
+      调用SharedBufferServer对象lcblk的成员函数retireAndLock得到的是一个UI元数据缓冲区的编号，这个编号保存在变量buf中。函数接下来就会调用Layer类的成员变量mBufferManager所描述的一个BufferManager对象的成员函数setActiveBufferIndex来将这个编号为buf的图形缓冲区设置当前激活的图形缓冲区，即接下来要被SurfaceFlinger服务渲染的图形缓冲区。
+
+      每一个分配的图形缓冲区都关联有一个编号，而这个编号正好就是一个对应的UI元数据缓冲区的编号。因此，知道了一个UI元数据缓冲区的编号之后，就可以找到对应的图形缓冲区。
+
+      函数接下来还会通过SharedBufferServer对象lcblk的成员函数getDirtyRegion、getCrop和getTransform来获得当前激活的图形缓冲区的元信息，即裁剪区域、纹理坐标和旋转方向。这些元信息是在前面分析UI元数据缓冲区进入待渲染队列的过程的Step 1中提供的，因此，这里就可以将它们获取回来。后面在渲染当前激活的图形缓冲区时，就需要使用到这些元信息。
+
+      最后，函数调用SharedBufferServer对象lcblk的成员函数getQueueCount来检查待渲染待队列中的缓冲区的个数是否大于0。如果大于0，那么就说明还有图形缓冲区在等待被渲染。在这种情况下，函数就就会继续调用Layer类的成员变量mFlinger的成员函数signalEvent来通知SurfaceFlinger服务在执行完成当前这次的Surface渲染操作之后，接着要马上进行下一次的Surface渲染操作。
+
+
+
+
+
+
+SurfaceFlinger服务运行在System进程中，用来统一管理系统的帧缓冲区设备。由于SurfaceFlinger服务运行在System进程中，因此，Android应用程序就需要通过Binder进程间通信机制来请求它来渲染自己的UI。
+
+由于SurfaceFlinger服务需要与Android应用程序执行Binder进程间通信，因此，它本身就是一个Binder本地对象。
+
+Android应用程序请求SurfaceFlinger服务渲染自己的UI可以分为三步曲：
+
+* 首先是创建一个到SurfaceFlinger服务的连接；
+
+* 接着再通过这个连接来创建一个Surface；
+
+* 最后请求SurfaceFlinger服务渲染该Surface。
+
+
+
+**SurfaceFlinger服务实现的接口：ISurfaceComposer**
+
+**SurfaceFlinger服务的Binder代理对象：BpSurfaceComposer**
+
+
+
+SurfaceFlinger服务虽然是在System进程中启动的，但是它在启动的时候创建一个线程来专门负责渲染UI。为了方便描述，我们将这个线程称为UI渲染线程。UI渲染线程的执行函数就为SurfaceFlinger类的成员函数threadLoop，同时它有一个消息队列。当UI渲染线程不需要渲染UI时，它就会在SurfaceFlinger类的成员函数waitForEvent中睡眠等待，直到SurfaceFlinger服务需要执行新的UI渲染操作为止。
+
+
+
+**SurfaceFlinger服务什么时候会需要执行新的UI渲染操作呢？**
+
+当系统显示屏属性发生变化，或者应用程序窗口发生变化时，它就需要重新渲染系统的UI。
+
+这时候SurfaceFlinger服务就会从SurfaceFlinger类的成员函数waitEvent中唤醒，并且依次执行SurfaceFlinger类的成员函数handleConsoleEvents、handleTransaction、handlePageFlip、handleRepaint和postFramebuffer来具体执行渲染UI的操作。
+
+* **handleConsoleEvents**用来处理控制台事件；
+
+* **handleTransaction**用来处理系统显示屏属性变化以及应用程序窗口属性变化；
+
+* **handlePageFlip**用来获得应用程序窗口下一次要渲染的图形缓冲区，即设置应用程序窗口的活动图形缓冲区；
+
+* **handleRepaint**用来重绘应用程序窗口；
+
+* **postFramebuffer**用来将系统UI渲染到硬件帧缓冲区中去。
+
+
+
+应用程序是运行在与SurfaceFlinger服务不同的进程中的，每当应用程序需要更新自己的UI时，它们就会通过Binder进程间通信机制来通知SurfaceFlinger服务。SurfaceFlinger服务接到这个通知之后，就会调用SurfaceFlinger类的成员函数signalEvent来唤醒UI渲染线程，以便它可以执行渲染UI的操作。注意，SurfaceFlinger服务是通过Binder线程来获得应用程序的请求的，因此，这时候SurfaceFlinger服务的UI渲染线程实际上是被Binder线程唤醒的。SurfaceFlinger类的成员函数sig
+
+前面提到， SurfaceFlinger服务在在执行UI渲染操作时，需要调用SurfaceFlinger类的成员函数handleConsoleEvents来处理控制台事件。这怎么理解呢？原来，SurfaceFlinger服务在启动的时候，还会创建另外一个线程来监控由内核发出的帧缓冲区硬件事件。为了方便描述，我们将这个线程称为控制台事件监控线程。每当帧缓冲区要进入睡眠状态时，内核就会发出一个睡眠事件，这时候SurfaceFlinger服务就会执行一个释放屏幕的操作；而当帧缓冲区从睡眠状态唤醒时，内核就会发出一个唤醒事件，这时候SurfaceFlinger服务就会执行一个获取屏幕的操作。
+
+
+
+
+
+###  3. GraphicPlane、DisplayHardware和FramebufferNativeWindow
+
+SurfaceFlinger服务通过一个**GraphicPlane**对象来描述系统的显示屏，即系统的硬件帧缓冲区。
+
+GraphicPlane类内部聚合了一个**DisplayHardware**对象，通过这个DisplayHardware对象就可以访问系统的硬件帧缓冲区。
+
+DisplayHardware类内部又包含了一个**FramebufferNativeWindow**对象，这个FramebufferNativeWindow对象才是真正用来描述系统的硬件帧缓冲区的。
+
+FramebufferNativeWindow类的作用类似于在前面Android应用程序请求SurfaceFlinger服务创建Surface的过程分析一文中所介绍的Surface类，它是连接OpenGL库和Android的UI系统的一个桥梁，OpenGL库就是通过这个桥梁来将Android系统的UI渲染到硬件帧缓冲区中去的。
+
+
+
+#### (1) GraphicPlane的初始化
+
+GraphicPlane对象的初始化过程主要是调用GraphicPlane类的成员函数setDisplayHardware来实现；
+
+1. 函数首先设置显示屏的初始大小和旋转方向。GraphicPlane类有三个成员变量mDisplayWidth、mDisplayHeight和mDisplayTransform，前两者的类型为float，分别用描述显示屏的初始宽度和高度，而后者的类型为Transform，用来描述显示屏的初始旋转矩阵。Transform类的作用是来描述变换矩阵，以便后面在渲染UI时可以用来动态地计算显示屏的大小和旋转方向等。
+
+2. 显示屏的初始化宽度和高度是由参数hw所描述的一个DisplayHardware对象来描述的，而显示屏的初始旋转方向则是由名称为“ro.sf.hwrotation”的系统属性来决定的。如果没有设置名称为“ro.sf.hwrotation”的系统属性，那么显示屏的旋转方向就为默认方向，即ISurfaceComposer::eOrientationDefault。
+
+3. 获得了显示屏的初始化宽度w、高度h和旋转方向displayOrientation之后，函数接着就调用GraphicPlane类的静态成员函数orientationToTransfrom来将它们构造成一个变换矩阵，并且保存在GraphicPlane类的成员变量mDisplayTransform中。
+
+4.  函数接下来继续判断显示屏的初始化旋转方向是否将初始化宽度和高度值翻转了。如果翻转了，那么就需要相互调换GraphicPlane类的成员变量mDisplayWidth和mDisplayHeight的值，以便可以正确地反映显示屏的初始化宽度和高度。
+
+5. 函数最后调用GraphicPlane类的成员函数setOrientation来设备显示屏的实际度度、高度以及旋转方向。
+
+
+
+#### (2) DisplayHardware对象的初始化
+
+一个DisplayHardware对象的初始化过程是通过调用DisplayHardware类的成员函数init来实现的。
+
+这段代码首先是创建了一个FramebufferNativeWindow对象，并且保存在DisplayHardware类的成员变量mNativeWindow中，用来管理硬件帧缓冲区。有了这个FramebufferNativeWindow对象之后，就可以通过它里面的一个fb设备来获得硬件帧缓冲区的点密度以及刷新频率等信息。
+
+这段代码接着再加载HAL层中的overlay模块，目的是要打开系统的overlay设备。在Android系统中，我们可以将overlay看作是一种特殊的Surface，一般用来显示视频。
+
+.......
+
+一个DisplayHardware对象在初始化完成之后，它还不能直接用来渲染系统的UI，因为它所初始化的的绘图表面以及绘图上下文并没有作为当前线程的绘图表面以及绘图上下文。这是由于SurfaceFlinger服务可以同时支持多个DisplayHardware对象，即同时支持多个显示屏造成的。
+
+从前面SurfaceFlinger类的成员函数readyToRun可以知道，当前正在初始化的DisplayHardware对象的编号为0，并且它是在SurfaceFlinger服务的UI渲染线程中创建的，为了可以将它设置系统的主显示屏，即主绘图表面，SurfaceFlinger类的成员函数readyToRun接下来还会调用它的成员函数makeCurrent来将它所里面的绘图表面以及绘图上下文设置为SurfaceFlinger服务的UI渲染线程的绘图表面以及绘图上下文。
+
+系统的硬件帧缓冲区在初始化完成之后，SurfaceFlinger服务以后就可以调用用来描述它的一个DisplayHardware对象的成员函数flip来在它上面渲染系统的UI.
+
+这个函数主要就是调用OpenGL库中的函数eglSwapBuffers来将系统的UI渲染到系统的主绘图表面上去的，即渲染到系统的硬件帧缓冲区上去的。在渲染之前，函数会首先判断系统的主绘图表面是否支持EGL_ANDROID_swap_rectangle扩展属性和部分更新属性。如果支持EGL_ANDROID_swap_rectangle扩展属性，即DisplayHardware类的成员变量mFlags的SWAP_RECTANGLE位等于1，那么就需要调用函数eglSetSwapRectangleANDROID来设置要渲染的区域，以便在渲染UI时，可以通过软件的方式来支持部分更新。如果硬件帧缓冲区直接支持部分更新属性，即DisplayHardware类的成员变量mFlags的PARTIAL_UPDATES位等于1，那么就需要调用DisplayHardware类的成员变量mNativeWindow所描述的一个本地窗口的成员函数setUpdateRectangle来设置要更新的那一部分区域。
+
+DisplayHardware类的成员函数flip在调用函数eglSwapBuffers来渲染UI之前，实际上需要通过其成员变量mNativeWindow所描述的一个本地窗口（FramebufferNativeWindow）来获得一个空闲的图形缓冲区，然后才可以将UI数据写入到这个空闲的图形缓冲区中去，最后再渲染到硬件帧缓冲区中去。前面提到，FramebufferNativeWindow类的作用类似于在前面Android应用程序请求SurfaceFlinger服务创建Surface的过程分析一文中所介绍的Surface类，不过它里面所维护的图形缓冲区是直接在硬件帧缓冲区上创建的
+
+
+
+#### (3) 父类DisplayHardwareBase的实现
+
+这里可以了解DisplayHardware类的另外一个作用，即它还会创建一个线程来监控硬件帧缓冲区的睡眠和唤醒事件。
+
+当显示屏处于唤醒状态时，DisplayHardwareBase类的成员变量mScreenAcquired的值就会等于1，表示SurfaceFlinger服务就可以访问显示屏；而当显示屏处于睡眠状态时，DisplayHardwareBase类的成员变量mScreenAcquired的值就会等于0，表示SurfaceFlinger服务不可以访问显示屏。
+
+用来监控显示屏唤醒/睡眠状态切换的线程是在DisplayHardwareBase对象的初始化过程中创建的，它运行起来之后，就会在一个无限循环中不断地监控显示屏唤醒/睡眠状态切换事件。为了方便描述，我们将这个线程称为控制台事件监控线程。DisplayEventThreadBase类的成员变量mFlinger指向了SurfaceFlinger服务，一旦控制台事件监控线程监控到显示屏发生唤醒/睡眠状态切换，那么就会通过它来通知SurfaceFlinger服务。
+
+控制台事件监控线程的运行过程大概上这样的。在每一次循环中，控制台事件监控线程首先监控显示屏是否要进入睡眠状态了。如果是的话，那么该线程就会通过DisplayEventThreadBase类的成员变量mFlinger来通知SurfaceFlinger服务，并且等待SurfaceFlinger服务处理完成这个通知。SurfaceFlinger服务一旦处理完成显示屏进入睡眠状态的事件，它就会调用DisplayHardwareBase类的成员函数releaseScreen来将其成员变量mScreenAcquired的值设置为0，表示它目前不可以访问显示屏。控制台事件监控线程接下来就会等待显示屏被唤醒过来。一旦显示屏被唤醒过来，那么该线程就会通过DisplayEventThreadBase类的成员变量mFlinger来通知SurfaceFlinger服务。SurfaceFlinger服务得到这个通知之后，就会调用DisplayHardwareBase类的成员函数acquireScreen来将其成员变量mScreenAcquired的值设置为1，表示它目前可以访问显示屏。在下一篇文章分析SurfaceFlinger服务的线程模型时，我们再详细分析这个过程。
+
+DisplayHardwareBase类另一方面用来控制SurfaceFlinger服务当前是否能够在显示屏上渲染UI。当系统的其它组件请求SurfaceFlinger服务关闭显示屏时，SurfaceFlinger服务就会调用DisplayHardwareBase类的成员函数setCanDraw来将其成员变量mCanDraw的值设置为0；而当系统的其它组件请求SurfaceFlinger服务打开显示屏时，SurfaceFlinger服务就会调用DisplayHardwareBase类的成员函数setCanDraw来将其成员变量mCanDraw的值设置为1。只有当DisplayHardwareBase类的成员变量mScreenAcquired和mCanDraw的值均等于1时，SurfaceFlinger服务才可以在显示屏上渲染系统的UI。为了方便SurfaceFlinger服务判断它当前是否可以在显示屏上渲染系统的UI，DisplayHardwareBase类提供了另外一个成员函数canDraw。当DisplayHardwareBase类的成员函数canDraw的返回值等于true时，就表示SurfaceFlinger服务可以在显示屏上渲染系统的UI，否则就不可以。
+
+
+
+#### (4) FramebufferNativeWindow类的实现
+
+FramebufferNativeWindow类一方面用来在OpenGL库和Android本地窗口系统之间建立连接，这样，我们就可以使用它的成员函数dequeueBuffer来为OpenGL库分配空闲图形缓冲区，以及使用它的成员函数queueBuffer来将OpenGL已经填充好UI数据的图形缓冲区渲染到硬件帧缓冲区中去。
+
+FramebufferNativeWindow类另一方面还继承了LightRefBase类，FramebufferNativeWindow类对象可以结合Android系统的轻量级指针sp来使用，以便可以自动维护生命周期。
+
+1. Surface类使用的图形缓冲区一般是在匿名共享内存中分配的，并且是由SurfaceFlinger服务来负责分配，然后再传递给应用程序进程使用的，而FramebufferNativeWindow类使用的图形缓冲区是直接在硬件帧缓冲区分配的，并且它可以直接将这些图形缓冲区渲染到硬件帧缓冲区中去。
+
+   从前面Android帧缓冲区（Frame Buffer）硬件抽象层（HAL）模块Gralloc的实现原理分析一文可以知道，要从硬件帧缓冲区中分配和渲染图形缓冲区，就必须要将HAL层中的Gralloc模块加载到当前的进程空间来，并且打开里面的gralloc设备和fb设备，其中，gralloc设备用来分配图形缓冲区，而fb设备用来渲染图形缓冲区。因此，FramebufferNativeWindow类包含了一个类型的alloc_device_t*的成员变量grDev和一个类型为framebuffer_device_t*的成员变量fbDev，它们分别指向HAL层中的Gralloc模块的gralloc设备和fb设备。
+
+2. FramebufferNativeWindow类在内部还包含了一个类型为sp<NativeBuffer>的数组buffers，用来描述OpenGL库可以使用的图形缓冲区，数组的大小等于NUM_FRAME_BUFFERS，即等于硬件帧缓冲区能够提供的图形缓冲区的个数。
+
+   例如，在Android 2.3系统中，硬件帧缓冲区能够提供的图形缓冲区的个数等于2，这意味着Android系统可以使用双缓冲区技术来渲染系统的UI。由于OpenGL库所使用的图形缓冲区必须要实现android_native_buffer_t接口，因此，NativeBuffer类继承了android_native_buffer_t类。此外，NativeBuffer类还继承了LightRefBase类，因此，它的对象就和FramebufferNativeWindow类对象一样，可以结合Android系统的轻量级指针sp来使用，以便可以自动维护生命周期。
+
+
+
+**我们只关注FramebufferNativeWindow类的静态成员函数dequeueBuffer和queueBuffer的实现，因为它们负责用来为OpenGL库分配和渲染图形缓冲区。**
+
+成员函数dequeueBuffer的实现：
+
+1. 参数window虽然是一个类型为ANativeWindow的指针，但是它指向的实际上是一个FramebufferNativeWindow对象，这个FramebufferNativeWindow对象是在DisplayHardware类的成员函数init中创建的，因此，函数在开始的地方就可以将它转换一个FramebufferNativeWindow对象self。
+2. 有了FramebufferNativeWindow对象self之后，我们就可以在它内部的图形缓冲区数组buffers中获取下一个空闲图形缓冲区。前面提到，下一个空闲图形缓冲区的在数组buffer中的位置就保存在FramebufferNativeWindow对象self的成员变量mBufferHead中。因此，函数就可以将FramebufferNativeWindow对象self的成员变量mBufferHead的值取出来保存在变量index中，以便接下来可以从FramebufferNativeWindow对象self内部的图形缓冲区数组buffers中取出一个图形缓冲区。此外，函数还需要将FramebufferNativeWindow对象self的成员变量mBufferHead增加1，以便它可以指向下一个空闲的图形缓冲区。注意，FramebufferNativeWindow对象self内部的图形缓冲区数组buffers是循环使用的，因此，在将它的成员变量mBufferHead增加1之后，要判断它的值是否已经大于等于数组的大小，如果大于等于的话，就需要将它的值设置为0，即绕回到前面去。
+3. 从前面的分析可以知道，FramebufferNativeWindow对象self内部可用的空闲图形缓冲区的个数保存在其成员变量mNumFreeBuffers中，因此，当这个成员变量的值等于0的时候，就表示FramebufferNativeWindow对象self没有空闲的空闲图形缓冲区可用，这时候当前线程就会通过FramebufferNativeWindow对象self的成员变量mCondition所描述的一个条件变量进入到睡眠等待状态，直到有可用的空闲图形缓冲区为止。什么时候FramebufferNativeWindow对象self内部才会有可用的空闲图形缓冲区呢？当OpenGL库请求FramebufferNativeWindow对象self将一个图形缓冲区的内容渲染到硬件帧缓冲区之后，FramebufferNativeWindow对象self就会获得一个可用的空闲图形缓冲区了，后面我们分析FramebufferNativeWindow类的成员函数queueBuffer的实现时就会看到这个逻辑。
+4. 一旦FramebufferNativeWindow对象self内部有可用的空闲图形缓冲区，那么函数就会将这个空闲图形缓冲区就会返回给OpenGL库，即保存在输出参数buffer，并且将FramebufferNativeWindow对象self内部可用的空闲图形缓冲区的个数减1，以及将OpenGL库当前正前正在使用的图形缓冲区在数组buffers中的位置保存在FramebufferNativeWindow对象self的成员变量mCurrentBufferIndex中。
+
+
+
+接下来我们继续分析FramebufferNativeWindow类的成员函数queueBuffer的实现
+
+
+
+1. 参数window指向的实际上也是一个FramebufferNativeWindow对象，这个FramebufferNativeWindow对象是在DisplayHardware类的成员函数init中创建的，因此，函数在开始的地方同样是先将它转换一个FramebufferNativeWindow对象self。
+2. 参数buffer指向的是一个实际类型为NativeBuffer的图形缓冲区，这个图形缓冲区是在FramebufferNativeWindow类的成员函数dequeueBuffer中分配的，如前所述。
+3. FramebufferNativeWindow类的成员函数queueBuffer目标就是要将参数buffer所描述的图形缓冲区渲染到硬件帧缓冲区中去，因此，我们就需要获得FramebufferNativeWindow对象self的成员变量fbDev所描述的一个fb设备。有了这个fb设备之后， 我们就可以调用它的成员函数post来将参数buffer所描述的图形缓冲区渲染到硬件帧缓冲区中去。
+4. 参数buffer所描述的图形缓冲区被渲染到硬件帧缓冲区中去之后，它就变成一个空闲的图形缓冲区了，因此，我们就需要将它返回给FramebufferNativeWindow对象self内部的图形缓冲区数组buffers中去，并且将可用的空闲图形缓冲区的个数增加1，最后通过FramebufferNativeWindow对象self的成员变量mCondition所描述的一个条件变量将前面正在等待从FramebufferNativeWindow对象self内部分配空闲图形缓的线程唤醒。
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
