@@ -127,7 +127,6 @@ public static void main(String[] args) {
         Class<? extends Person> aClass = person.getClass();
         try {
             Field age = aClass.getDeclaredField("age");
-         	//如果 accessible 标志被设置为true，那么反射对象在使用的时候，不会去检查Java语言权限			 //控制（private之类的）,即不管这个字段是不是public，一律允许访问。
             age.setAccessible(true);
             Object o = age.get(person);
             System.out.println(o);
@@ -137,13 +136,12 @@ public static void main(String[] args) {
     }
 ```
 
+```java
 //输出
-
-```
 18
 ```
 
-
+如果 accessible 标志被设置为true，那么反射对象在使用的时候，不会去检查Java语言权限控制（private之类的）,即不管这个字段是不是public，一律允许访问。
 
 #### 设置字段值
 
