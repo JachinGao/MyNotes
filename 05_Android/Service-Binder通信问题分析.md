@@ -1,0 +1,29 @@
+> 参考文章链接：https://cloud.tencent.com/developer/article/1154078
+
+
+
+很多文章将Binder框架定义了四个角色：Server，Client，ServiceManager、以及Binder驱动，但这容易将人引导到歧途：好像所有的Binder服务都需要去ServiceManager去注册才能使用，其实不是这样。例如，平时APP开发通过bindService启动的服务，以及有些自己定义的AIDL远程调用，都不一定都ServiceManager注册这条路，**个人理解：ServiceManager主要功能是：管理系统服务，比如AMS、WMS、PKMS服务等**，而APP通过的bindService启动的Binder服务其实是由SystemServer的ActivityManagerService负责管理。
+
+
+
+#### ServiceManager addService的限制--并非所有服务都能通过addService添加到ServiceManager
+
+ServiceManager其实主要的面向对象是系统服务，大部分系统服务都是由SystemServer进程总添加到ServiceManager中去的，在通过ServiceManager添加服务的时候，是有些权限校验的。普通的进程是没有权限注册到ServiceManager中的，那么APP平时通过bindService启动的服务怎么注册于查询的呢？接管这个任务的就是SystemServer的ActivityManagerService。
+
+
+
+#### bindService启动Service与Binder服务实体的流程 （ActivityManagerService）
+
+bindService比startService多了一套Binder通信，其余的流程基本相同，而startService的流程，同startActivity差不多，四大组件的启动流程这里不做分析点，主要看bindService中C/S通信的建立流程，在这个流程里面，APP与服务端互为C/S的特性更明显，在APP开发的时候，binder服务是通过Service来启动的。
+
+Service的启动方式有两种startService，与bindService，这里只考虑后者，另外启动的binder服务也分为两种情况：第一种，client同server位于同一进程，可以看做内部服务，第二种，Client与Server跨进程，即使是位于同一个APP，第一种可以不用AIDL来编写，但是第二种必须通过AIDL实现跨进程通信。
+
+
+
+#### 调用流程分析
+
+从ActivitybindService入口开始：bindService大部分的流程与startActivity类似，其实都是通过AMS启动组件，这里只将一些不同的地方，Activity启动只需要Intent就可以了，而Service的bind需要一个ServiceConnection对象，这个对象其实是为了AMS端在启动Service后回调用的，ServiceConnection是个接口，其实例在ContextImpl中。
+
+**AIDL实现跨进程通信**
+
+IMyAidlInterface.aidl定义了通信的借口，通过build之后，构建工具会自动为IMyAidlInterface.aidl生成一些辅助类，这些辅助类主要作用是生成Binder通信协议框架，必须保证两方通信需要指令相同，才能解析通信内容。
