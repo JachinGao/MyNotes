@@ -291,9 +291,569 @@ for (var n in obj) {
 
 
 
-### 十三、this
+### 十二、this
 
 解析器在调用函数时，每次都会向函数内部传递进一个隐含参数，改参数就是this，this指向的是一个对象，该对象叫做函数执行的上下文对象，根据函数调用方式不同，this会指向不同的对象。
 
 * 以函数调用的形式调用时，永远都是window；
 * 以对象方法形式调用时，this就是调用方法的那个对象；
+
+
+
+### 十三、构造函数
+
+* 构造函数就是一个普通函数，创建方式和普通函数没有区别，不同的是构造函数首字母习惯大写；
+
+* 构造函数和普通函数调用方式不同，普通函数直接调用，构造函数使用new关键字调用；
+
+构造函数执行流程：
+
+1. 立刻创建一个新的对象；
+2. 将新建的对象设置为函数中的this；
+3. 逐行执行函数中的代码；
+4. 将新建的对象作为返回值返回；
+
+instanceof 可以检查一个对象是否是一个类的实例；
+
+```javascript
+function Person() {
+    this.name = "张三";
+    this.age = 18;
+}
+
+var per = new Person();
+console.log(per);
+console.log(per instanceof Person);
+
+//输出
+Person {name: "张三", age: 18}
+true
+```
+
+想对象中添加方法，可以将方法放在全局作用域中定义，该方法只会被创建一次；（但是定义在全局定义域中，是有局限的，会污染全局作用域的命名空间）
+
+```javascript
+function Person(name, age) {
+    this.name = name;
+    this.age = age;
+    this.sayName = fun;
+}
+
+function fun() {
+    alert("我的名字是：" + this.name)
+}
+
+var per1 = new Person("张三", 18);
+var per2 = new Person("李四", 20);
+
+per1.sayName();
+per2.sayName();
+console.log(per1.sayName === per2.sayName);
+```
+
+
+
+### 十四、原型对象
+
+1. 我们所创建的每一个函数，解析器都会向函数中添加一个属性prototype；
+
+2. 当函数以构造函数的形式调用时，它所创建的对象中都会有一个隐含的属性，我们可以通过\__proto__来访问该属性；
+
+3. 原型对象就相当于一个公共区域，所有同一个类的实例都可以访问这个原型对象，我们可以将对象中共有的内容，统一设置到原型对象中。
+
+4. 我们访问对象的一个属性或方法时，它会现在对象自身中寻找，如果有直接使用，没有则会去原型对象中寻找。
+
+   ```javascript
+   function Person() {
+   }
+   
+   Person.prototype.name = "原型中的名字";
+   
+   var p1 = new Person();
+   var p2 = new Person();
+   
+   p1.name = "p1中的name";
+   
+   console.log(p1.name);
+   console.log(p2.name);
+   
+   //输出
+   p1中的name
+   原型中的名字
+   ```
+
+   ```javascript
+   function Person() {
+   }
+   
+   Person.prototype.name = "原型中的名字";
+   
+   var p1 = new Person();
+   //p1.name = "p1中的name";
+   
+   //in 用来检查对象中是否含有某个属性，如果对象中没有，原型中有，也会返回true；
+   console.log("name" in p1);
+   
+   //用来检查对象自身中是否含有该属性；
+   console.log(p1.hasOwnProperty("name"));
+   
+   //输出
+   true
+   false
+   ```
+
+5. 原型对象也是对象，所以它也有原型；自身没有去原型中找，原型没有去原型的原型中找，如果在Object中依然没有找到，返回undefined；
+
+   ```javascript
+   console.log(p1.hasOwnProperty("hasOwnProperty"));
+   //去原型对象中找
+   console.log(p1.__proto__.hasOwnProperty("hasOwnProperty"));
+   /去原型对象中的原型中找；
+   console.log(p1.__proto__.__proto__.hasOwnProperty("hasOwnProperty"));
+   
+   //输出
+   false
+   false
+   true
+   ```
+
+   
+
+### 十五、toString
+
+当我们不希望仅在控制台输出【object Object】，可以添加toString()方法；
+
+```javascript
+function Person(name, age) {
+    this.name = name;
+    this.age = age;
+}
+
+Person.prototype.toString = function () {
+    console.log("name = " + this.name + ", age = " + this.age);
+}
+
+var p1 = new Person("张三",18);
+var p2 = new Person("李四",20);
+
+console.log(p1.toString());
+console.log(p2.toString());
+```
+
+ 
+
+### 十六、数组
+
+数组也是对象，和普通对象一样，也是存储一些值；
+
+普通对象使用字符串作为属性名，而数组使用数字作为索引操作元素；
+
+```javascript
+//创建数组；
+var arr = new Array();
+
+//向数组添加元素；
+arr[0] = 10;
+arr[1] = 20;
+```
+
+```javascript
+//使用字面量来创建数组；
+var arr = [1,2,3,4];
+
+//创建一个长度为10的数组
+var arr = new Array(10);
+
+//数组中的元素可以是任意的数据类型,也可以是对象；
+var arr = [1,true,"hello",null];
+```
+
+#### 数组常用方法
+
+* push(): 向数组末尾添加一个或多个元素，并返回数组的新的长度；
+
+  ```javascript
+  var arr = ["张三", "李四"];
+  var result = arr.push("王五", "赵六");
+  console.log("result:" + result);
+  
+  //输出
+  result:4
+  ```
+
+* pop(): 删除数组的最后一个元素，并将被删除的元素作为返回值返回；
+
+  ```javascript
+  var arr = ["张三", "李四"];
+  var result = arr.push("王五", "赵六");
+  console.log("result:" + result);
+  
+  var val = arr.pop();
+  console.log("result:" + val);
+  
+  //输出
+  result:4
+  result:赵六
+  ```
+
+* unshift() : 向数组开头添加一个或多个元素，并返回数组长度；原数组其他元素会依次调整；
+
+* shift(): 可以删除数组第一个元素，并将被删除的元素作为返回值返回；
+
+  ```javascript
+  var arr = ["张三", "李四"];
+  var result = arr.push("王五", "赵六");
+  console.log(arr);
+  
+  arr.unshift("hello");
+  console.log(arr);
+  arr.shift();
+  console.log(arr);
+  
+  //输出
+  ["张三", "李四", "王五", "赵六"]
+  ["hello", "张三", "李四", "王五", "赵六"]
+  ["张三", "李四", "王五", "赵六"]
+  ```
+
+  
+
+#### 数组遍历
+
+  * 使用for循环
+  * 使用foreach。foreach()方法需要一个函数作为参数，该函数为回调函数；每次执行，浏览器会将遍历到的元素以实参的形式传递进来，我们可以定义形参，读取这些内容；
+    * 第一个参数：正在遍历的元素；
+    * 第二个参数：当前元素的索引；
+    * 第三个参数：遍历的数组；
+
+  ```javascript
+  var arr = ["张三", "李四", "王五", "赵六"];
+  
+  for (let i = 0; i < arr.length; i++) {
+      console.log("val:" + arr[i]);
+  }
+  
+  arr.forEach(function (a, b, c) {
+      console.log("val" + a + ", index:" + b + ", arr:" + c);
+  });
+  
+  //输出
+  val:张三
+  val:李四
+  val:王五
+  val:赵六
+  val:张三, index:0, arr:张三,李四,王五,赵六
+  val:李四, index:1, arr:张三,李四,王五,赵六
+  vail王五, index:2, arr:张三,李四,王五,赵六
+  val:赵六, index:3, arr:张三,李四,王五,赵六
+  ```
+
+  
+
+#### slice和splice
+
+**slice**
+
+1. slice() 可以用来从数组提取指定元素；
+
+2. 将截取的元素封装到一个新的数组中作为返回值返回；
+3. 该方法不会改变原数组，只是将截取到的元素封装到一个新的数组中返回；
+
+4. 参数：
+   * 截取开始位置索引，包含开始索引；
+   * 截取结束位置索引，不包含借宿索引；
+
+5. 索引可以传递一个负值，表示截取到倒数第几个元素；
+
+```javascript
+var arr = ["张三", "李四", "王五", "赵六"];
+console.log("所有元素：" + arr);
+
+var slice = arr.slice(0, 2);
+console.log("截取元素：" + slice);
+
+//输出
+所有元素：张三,李四,王五,赵六
+截取元素：张三,李四
+```
+
+
+
+**splice**
+
+1. 可以用于删除数组中的指定元素，并将被删除元素作为返回值返回；
+2. 该方法会影响到原数组，会将指定元素从原数组中删除；
+3.  参数：
+   * 参数1：表示开始位置索引；
+   * 参数2：表示删除数量；
+   * 第三个及以后参数：传递的一些新的参数，插入位置为开始位置索引前面；
+
+```javascript
+var arr = ["张三", "李四", "王五", "赵六"];
+console.log("所有元素：" + arr);
+
+var splice = arr.splice(0, 2, "Hello", "World");
+console.log("splice:" + splice);
+console.log("arr:" + arr);
+
+//输出
+所有元素：张三,李四,王五,赵六
+splice:张三,李四
+arr:Hello,World,王五,赵六
+```
+
+
+
+#### concat()
+
+可以连接两个或多个数组，并将新的数组返回；
+
+该方法不会对原数组产生影响；
+
+```javascript
+var arr1 = ["张三", "李四"];
+var arr2 = ["王五", "赵六"];
+var arr3 = ["Hello", "World"];
+
+var concat = arr1.concat(arr2,arr3);
+console.log(concat);
+
+//输出
+ ["张三", "李四", "王五", "赵六", "Hello", "World"]
+```
+
+
+
+#### join()
+
+该方法可以将数组转换为一个字符串；
+
+在join()中可以指定一个字符串作为参数，作为数组中元素的连接符；(不指定的话，默认为逗号)
+
+```javascript
+var arr = ["张三", "李四", "王五", "赵六"];
+var str = arr.join("&&&");
+console.log(str);
+
+//输出
+张三&&&李四&&&王五&&&赵六
+```
+
+
+
+#### reverse() 
+
+1. 该方法用来反转数组；
+2. 该方法会直接修改原数组；
+
+```javascript
+var arr = ["张三", "李四", "王五", "赵六"];
+var reverse = arr.reverse();
+console.log(reverse);
+console.log(arr);
+
+//输出
+ ["赵六", "王五", "李四", "张三"]
+ ["赵六", "王五", "李四", "张三"]
+```
+
+
+
+#### sort()
+
+1. 用来对数组中的元素进行排序；
+2. 也会影响原数组，默认按照Unicode编码进行排序；
+3. 我们可以再sort中添加回调函数，来指定排序规则；
+   * 如果返回一个大于零的值，则元素会交换位置；
+   * 如果返回一个小于零的值，则元素位置不变；
+   * 返回零，默认相等，不交换位置；
+
+```javascript
+var arr = [1,2,3,4,11];
+
+var sort = arr.sort();
+console.log(sort);
+
+arr.sort(function (a,b){
+    if (a>b){
+        return 1;
+    }else if (a<b){
+        return -1;
+    }else {
+        return 0;
+    }
+});
+console.log(arr);
+
+//输出
+[1, 11, 2, 3, 4]
+[1, 2, 3, 4, 11]
+```
+
+
+
+### 十七、call()和apply()
+
+1. 这两个方法都是函数对象的方法，需要通过函数对象来调用；
+2. 当对函数调用call()和apply()都会调用函数执行；
+3. 调用call()和apply()可以将一个对象指定为第一个参数；
+   * 此时这个对象将会成为函数执行时的this；
+4. call() 方法可以将实参在对象之后传递；
+5. apply() 方法需要将实参封装在一个数组中统一传递；
+
+```javascript
+var obj1 = {
+    name: "张三",
+    sayName: function () {
+        console.log(this.name);
+    },
+
+    sayNum: function (a, b) {
+        console.log("a:" + a, "b:" + b);
+    }
+};
+
+var obj2 = {
+    name: "李四"
+};
+
+function fun() {
+    console.log("name:" + this.name);
+}
+
+fun.call(obj1);
+fun.call(obj2);
+obj1.sayName.call(obj2);
+obj1.sayNum.call(obj2, 1, 2);
+obj1.sayNum.apply(obj2, [1, 2]);
+
+//输出
+name:张三
+name:李四
+李四
+a:1 b:2
+a:1 b:2
+```
+
+
+
+### 十八、arguments
+
+在调用函数时，浏览器每次都会传递两个隐含的参数：
+
+1. 函数的上下文对象 this；
+2. 封装实参的对象arguments；
+   * arguments是一个类数组对象；它也可以通过索引操作数据，也可以获取长度；
+   * 在调用函数时，我们所传递的实参都会在arguments中保存；
+   * arguments.length 可以用来获取实参的长度；
+   * 我们即使不定义形参，也可以通过arguments使用实参； 
+
+```javascript
+function fun(a, b) {
+    console.log("args_length:" + arguments.length);
+}
+
+function fun2() {
+    console.log("args_length:" + arguments.length);
+}
+
+fun(1, 2);
+fun2(1, 2, 3);
+
+//输出
+args_length:2
+args_length:3
+```
+
+arguments中有一个属性叫做callee，就是当前正在指向的函数对象；
+
+```javascript
+function fun(a, b) {
+    console.log("args_length:" + arguments.length);
+    console.log(arguments.callee);
+}
+
+fun(1, 2);
+
+//输出
+args_length:2
+ƒ fun(a, b) {
+    console.log("args_length:" + arguments.length);
+    console.log(arguments.callee);
+}
+```
+
+
+
+### 十九、Date对象
+
+在JS中，使用Date对象来表示一个时间；
+
+```javascript
+var d = new Date();
+console.log(d);
+
+//输出
+Sat May 15 2021 17:17:52 GMT+0800 (中国标准时间)
+```
+
+
+
+### 二十、Math对象
+
+Math对象和其它对象不同，它不是一个构造函数；它属于一个工具类，里面封装了数学运算的属性和方法；
+
+
+
+### 二十一、包装类
+
+JS中为我们提供了三个包装类，通过这三个包装类可以将基本数据类型的数据转为对象；
+
+* String(): 可以将基本数据类型字符串转为String对象；
+* Number(): 可以将基本数据类型的数字转为Number对象；
+* Boolean(): 可以将基本数据类型的布尔值转为Boolean对象；
+
+
+
+### 二十二、字符串
+
+在底层，字符串是以字符数组的形式保存的；
+
+```javascript
+var str = "HelloWorld";
+console.log(str[1]);
+
+//获取长度
+console.log(str.length);
+
+//根据索引获取char
+console.log(str.charAt(0));  //输出:H
+
+//返回的是Unicode编码
+console.log(str.charCodeAt(0)); //输出：72
+
+//从Unicode编码获取对应的char；
+console.log(String.fromCharCode(72)); //输出：H
+
+//字符串拼接
+console.log(str.concat(", Jack"));  //输出：HelloWorld, Jack
+
+//返回指定字符的索引
+console.log(str.indexOf("l")); //输出：2
+
+//从后往前找
+console.log(str.lastIndexOf("l")); //输出：8
+
+//截取指定位置，不会影响原字符串；
+console.log(str.slice(0,5)); //输出：Hello
+
+//将字符串按照规则拆分为数组；
+var str2 = "Jay,John,Bob";
+console.log(str2.split(",")); //输出：["Jay", "John", "Bob"]
+```
+
+
+
+### 二十三、正则表达式
+
+用于定义一些字符串的规则， 计算机可以根据正则表达式检查该字符串是否符合规则；
