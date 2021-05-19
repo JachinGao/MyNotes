@@ -136,9 +136,7 @@ DOM，全称Document Object Model文档对象模型。JS中通过DOM来对HTML�
 </body>
   ```
 
-
-
- 查找#city下所有li节点# getElementsByTagName();
+1. 查找#city下所有li节点# getElementsByTagName();
 
   ~~~javascript
   var btn04 = document.getElementById("btn04");
@@ -163,7 +161,7 @@ DOM，全称Document Object Model文档对象模型。JS中通过DOM来对HTML�
 
   
 
-返回#city的所有子节点
+2. 返回#city的所有子节点
 
 ```javascript
 var btn05 = document.getElementById("btn05");
@@ -180,7 +178,7 @@ btn05.onclick = function () {
 
 
 
-返回#phone的第一个子节点
+3. 返回#phone的第一个子节点
 
 ```javascript
 var btn06 = document.getElementById("btn06");
@@ -192,6 +190,70 @@ btn06.onclick = function () {
     console.log(fir);
 }
 //输出：#text
+```
+
+
+
+4. 返回#bj的父节点
+
+```javascript
+//定义统一函数
+function myClick(idStr, fun) {
+    var btn = document.getElementById(idStr);
+    btn.onclick = fun;
+}
+```
+
+```javascript
+myClick("btn07", function () {
+    var bj = document.getElementById("bj");
+    var parentNode = bj.parentNode;
+    //显示标签里面的内容；
+    alert(parentNode.innerHTML);
+
+    //与innerHTML不同的是，它会自动将html去除；
+    alert(parentNode.innerText);
+});
+```
+
+
+
+5. 返回#android的前一个兄弟节点
+
+```javascript
+
+myClick("btn08", function () {
+    var bj = document.getElementById("android");
+    var previousSibling = bj.previousSibling;
+    alert(previousSibling.innerHTML);
+});
+```
+
+
+
+6. 读取#username的value属性值
+
+```javascript
+myClick("btn09", function () {
+    var um = document.getElementById("username");
+    //文本框value属性值，就是文本框中填写的内容；
+    alert(um.value);
+
+    um.value = "今天天气不错";
+    alert("修改完成");
+});
+```
+
+
+
+7. 设置#username的value属性值
+
+```javascript
+myClick("btn10", function () {
+    var um = document.getElementById("username");
+    //设置value属性值
+    um.value = "今天天气不错";
+});
 ```
 
 
@@ -355,5 +417,311 @@ onload事件会在整个页面加载完成后才触发，为window绑定一个on
 
 
 
+### 六、节点的修改
 
+**创建节点**
+
+* document.createElement(标签名)
+
+**删除节点**
+
+* 父节点.removeChild(子节点)
+
+**替换节点**
+
+* 父节点.replaceChild(新节点 , 旧节点)
+
+**插入节点**
+
+* 父节点.appendChild(子节点)
+* 父节点.insertBefore(新节点 , 旧节点）
+
+
+
+#### 示例代码
+
+```html
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
+<html>
+<head>
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+    <title>Untitled Document</title>
+    <link rel="stylesheet" type="text/css" href="style/css.css"/>
+    <script type="text/javascript">
+
+        function myClick(idStr, fun) {
+            var btn = document.getElementById(idStr);
+            btn.onclick = fun;
+        }
+
+        window.onload = function () {
+            //创建“广州”节点，添加到city下
+            myClick("btn01",function (){
+              var city = document.getElementById("city");
+              //用于创建一个元素节点对象；
+              //它需要一个标签名作为参数，将会根据该标签名创建元素节点对象，并将创建好的对象作为返回值返回
+              var li = document.createElement("li");
+
+              //用于创建一个文本节点对象
+              //需要一个文本内容作为参数，将会根据该内容创建文本节点，并将新的节点返回；
+              var text = document.createTextNode("广州");
+
+              //父节点中添加一个新的子节点；
+              li.appendChild(text);
+              city.appendChild(li);
+            });
+
+            //将“广州”节点插入到bj前面
+            myClick("btn02",function (){
+                var li = document.createElement("li");
+                var text = document.createTextNode("广州");
+                li.appendChild(text);
+
+                var bj = document.getElementById("bj");
+                var city = document.getElementById("city");
+                city.insertBefore(li,bj);
+            });
+
+            //使用“广州”节点替换bj节点
+            myClick("btn03",function (){
+                var li = document.createElement("li");
+                var text = document.createTextNode("广州");
+                li.appendChild(text);
+
+                var bj = document.getElementById("bj");
+                var city = document.getElementById("city");
+                city.replaceChild(li,bj);
+            });
+
+            //删除bj节点
+            myClick("btn04",function (){
+                var bj = document.getElementById("bj");
+                var city = document.getElementById("city");
+                city.removeChild(bj);
+
+                //bj.parentNode.removeChild(bj);
+            });
+
+            //读取city内的HTML代码
+            myClick("btn05",function (){
+                var city = document.getElementById("city");
+                alert(city.innerHTML);
+            });
+
+            //设置bj内的HTML代码,添加一个广州标签；
+            myClick("btn06",function (){
+                var city = document.getElementById("city");
+                city.innerHTML += "<li>广州</li>";
+            });
+        };
+
+
+    </script>
+</head>
+<body>
+<div id="total">
+    <div class="inner">
+        <p>你喜欢哪个城市?</p>
+
+        <ul id="city">
+            <li id="bj">北京</li>
+            <li>上海</li>
+            <li>东京</li>
+            <li>首尔</li>
+        </ul>
+        <br>
+        <br>
+    </div>
+</div>
+<div id="btnList">
+    <div>
+        <button id="btn01">创建“广州”节点，添加到city下</button>
+    </div>
+    <div>
+        <button id="btn02">将“广州”节点插入到bj前面</button>
+    </div>
+    <div>
+        <button id="btn03">使用“广州”节点替换bj节点</button>
+    </div>
+    <div>
+        <button id="btn04">删除bj节点</button>
+    </div>
+    <div>
+        <button id="btn05">读取city内的HTML代码</button>
+    </div>
+    <div>
+        <button id="btn06">设置bj内的HTML代码</button>
+    </div>
+</div>
+</body>
+</html>
+```
+
+
+
+### 七、获取style属性
+
+
+
+#### 1. 读取内联样式
+
+通过style属性设置和读取的都是内联样式，无法读取样式表中的样式；
+
+```javascript
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>样式</title>
+
+    <style type="text/css">
+        #box1 {
+            width: 200px;
+            height: 200px;
+            background-color: red;
+        }
+    </style>
+
+    <script type="text/javascript">
+        window.onload = function () {
+            var box1 = document.getElementById("box1");
+
+            var btn1 = document.getElementById("btn01");
+            btn1.onclick = function () {
+                //通过JS修改元素样式
+                //语法：元素.style.样式名 = 样式值;
+                box1.style.width = "400px";
+                box1.style.height = "400px";
+                box1.style.backgroundColor = "yellow";
+            };
+
+            var btn2 = document.getElementById("btn02");
+            btn2.onclick = function (){
+                //读取样式值
+                alert(box1.style.height);
+            };
+        };
+    </script>
+</head>
+
+<body>
+<div id="box1"></div>
+<button id="btn01">按钮1</button>
+<button id="btn02">读取样式值</button>
+</body>
+</html>
+```
+
+
+
+#### 2. 读取样式表样式
+
+* 通过currentStyle可以获取样式表样式值，但只有IE浏览器支持；
+* 在其他浏览器中可以使用getComputedStyle()方法获取当前元素的样式；
+  * 该方法为window方法，可以直接使用；
+  * 该方法会返回一个对象，对象中封装了当前元素对应的样式；
+
+```javascript
+var btn2 = document.getElementById("btn02");
+btn2.onclick = function () {
+    var style = getStyle(box1, "width");
+    alert(style);
+};
+
+function getStyle(obj, name) {
+    if (window.getComputedStyle) {
+        //其他浏览器
+        return getComputedStyle(obj, null)[name];
+    } else {
+        //IE浏览器
+        return obj.currentStyle[name];
+    }
+}
+```
+
+#### 3. 样式的其他属性
+
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>样式</title>
+
+    <style type="text/css">
+        #box1 {
+            width: 200px;
+            height: 200px;
+            background-color: red;
+            padding: 10px;
+            border: 10px solid yellow;
+        }
+
+        #box2 {
+            width: 200px;
+            height: 300px;
+            background-color: #ffa;
+            overflow: auto;
+        }
+
+        #box3 {
+            width: 150px;
+            height: 600px;
+            background-color: rebeccapurple;
+        }
+
+    </style>
+
+    <script type="text/javascript">
+        window.onload = function () {
+            var box1 = document.getElementById("box1");
+            var btn1 = document.getElementById("btn01");
+
+            var box2 = document.getElementById("box2");
+            var box3 = document.getElementById("box3");
+
+            btn1.onclick = function () {
+                // 1.获取可见高度,包括内容区和内边距，不包括边框；
+                // 2.属性只读，不可修改；
+                console.log(box1.clientHeight); //输出220
+
+                //获取整个元素的高度，包括边框；
+                console.log(box1.offsetHeight); //输出240
+
+                //offsetTop 当前元素相对于其定位父元素的垂直偏移量
+                console.log(box1.offsetTop);
+
+                //scrollHeight：获取元素整个滚动高度
+                console.log("box2: scrollHeight:" + box2.scrollHeight); //600
+                console.log("box2: clientHeight:" + box2.clientHeight); //300;
+
+                //scrollTop：获取垂直滚动条滚动的距离
+                console.log("box2: scrollTop:"+box2.scrollTop);
+            };
+
+            //scrollHeight - scrollTop = clientHeight 表示滚动到底部
+            box2.onscroll = function (){
+              if (box2.scrollHeight-box2.scrollTop === box2.clientHeight){
+                  alert("滑动到底部");
+              }
+            };
+        };
+
+    </script>
+
+</head>
+<body>
+<div id="box1"></div>
+<br/>
+<br/>
+<div id="box2">
+    <div id="box3"></div>
+</div>
+
+<br/>
+<br/>
+<button id="btn01">按钮1</button>
+</body>
+</html>
+```
 
