@@ -856,4 +856,210 @@ console.log(str2.split(",")); //输出：["Jay", "John", "Bob"]
 
 ### 二十三、正则表达式
 
-用于定义一些字符串的规则， 计算机可以根据正则表达式检查该字符串是否符合规则；
+用于定义一些字符串的规则， 
+
+* 计算机可以根据正则表达式检查该字符串是否符合规则；
+* 将字符串中符合规则的内容提取出来；
+
+#### 创建
+
+```
+//语法
+var 变量 = new RegExp("正则表达式","匹配模式");
+
+//使用字面量创建正则表达式
+var 变量 = /正则表达式/匹配模式;
+```
+
+1. **匹配模式**
+
+   在构造函数中，可以传递一个匹配模式作为第二个参数；
+
+   * i 忽略大小写；
+   * g 全局匹配模式；
+
+2. **test()**
+
+   使用test()方法可以用来检测一个字符串是否符合正则表达式的规则；
+
+   * 符合返回true，否则返回false；
+
+```javascript
+//使用 | 表示或的意思
+var reg = /a|b/;
+console.log(reg.test("a")); //true
+
+//使用[]也是或的关系，[ab] == a|b;
+// [a-z] 任意小写字母
+// [A-Z] 任意大写字母
+// [0-9] 任意数字
+reg = /[abcd]/;
+console.log(reg.test("c"));  //true
+```
+
+```javascript
+//量词： 设置一个内容出现的次数
+// {n} 正好出现n次；
+// {m,n} 出现m-n次；
+// {m,} m次往上;
+// +:至少一个，相当于{1,}
+// * 0个，或多个，相当于{0，}
+// ? 0个或一个，相当于{0,1}
+var reg = /a{3}/;
+console.log(reg.test("abb"));  //输出：false
+console.log(reg.test("aaab")); //输出：true
+
+//检查一个字符串是否以a开头
+// ^ 表示开头
+reg = /^a/;
+console.log(reg.test("abc")); //true
+
+//检查一个字符串是否以a结尾
+// $ 表示结尾
+reg = /a$/;
+console.log(reg.test("ca"));  //true
+
+reg = /^a$/; //即是开头，又是结尾；
+console.log(reg.test("aaa")); //false
+console.log(reg.test("a"));   //true
+
+reg = /^a|a$/; //以a开头，或者以a结尾;
+console.log(reg.test("aaa")); //true
+```
+
+```javascript
+/**
+ * 检查一个字符串中是否含有.
+ * . 有特殊意义，表示任意字符
+ *
+ * 在正则表示是中使用\作为转义字符；
+ */
+
+var reg = /\./;
+console.log(reg.test("ab")); //false
+console.log(reg.test("a.")); //true
+
+/**
+ * \w 任意字母、数字、下划线
+ * \W 除了字母、数字、下划线
+ */
+reg = /\w/;
+console.log(reg.test("a")); //true
+console.log(reg.test("1")); //true
+console.log(reg.test("_")); //true
+
+reg = /\W/;
+console.log(reg.test("a")); //false
+console.log(reg.test("1")); //false
+console.log(reg.test("_")); //false
+console.log(reg.test("@")); //true
+
+/**
+ * \d 任意数字
+ * \D 任意非数字
+ */
+reg = /\d/;
+console.log(reg.test("123")); //true
+console.log(reg.test("abc")); //false
+
+reg = /\D/;
+console.log(reg.test("123")); //false
+console.log(reg.test("abc")); //true
+
+/**
+ * \s 空格
+ * \S 除了空格
+ */
+reg = /\s/;
+console.log(reg.test("ab c")); //true
+
+reg = /\S/;
+console.log(reg.test("abc")); //true
+
+/**
+ *  \b 单词边界
+ *  \B 除了单词边界
+ */
+reg = /\bchild\b/;
+console.log(reg.test("Hello children")); //false
+console.log(reg.test("Hello child")); //true
+```
+
+```javascript
+/**
+ * 手机号正则匹配
+ * 1. 以1开头
+ * 2. 第二位3-9任意数字
+ * 3. 三位以后任意数字9个
+ */
+var phoneReg = /^1[3-9][0-9]{9}$/;
+console.log(phoneReg.test("18651891111")); //true
+console.log(phoneReg.test("11012345678")); //false
+```
+
+```javascript
+/**
+ * 电子邮件正则表达式
+ *      hello        .hello        @    abc          .com              .cn                结尾
+ * 开头 任意字母下划线  .任意字母下滑线  @   任意字母数字    .任意字母（2-5位）   .任意字母（2-5位）
+ * ^    \w{3,}      (\.\w+)*      @    [a-z0-9]+     (\.[A-Za-z]{2,5}){1,2}               $
+ */
+var emailReg = /^\w{3,}(\.\w+)*@[a-z0-9]+(\.[A-Za-z]{2,5}){1,2}$/;
+console.log("email:" + emailReg.test("abc@163.com"));  //true
+console.log("email:" + emailReg.test("  abc@163.com")); //false
+console.log("email:" + emailReg.test("f#45bc@163.com")); //false
+console.log("email:" + emailReg.test("agc@1^3.com"));  //false
+```
+
+
+
+#### 字符串中的一些方法
+
+1. **split()**
+
+   拆分字符串；
+
+   * 将一个字符串拆分为一个数组；
+   * 方法中可以传递一个正则表达式作为参数，此时方法将会根据正则表达式拆分字符串；
+
+2. **match()**
+
+   可以根据正则表达式，从一个字符串中将符合条件的内容提取出来；
+
+   * 默认情况，我们match只会找到第一个符合要求的内容，找到后就会停止检索；
+   * 也可以设置为全局匹配模式，这样会匹配到所有的内容；
+
+3. **search()**
+
+   搜索字符串中是否含有指定内容；
+
+   * 如果搜索到指定内容，则会返回到第一次出现的索引，没有搜索到则会返回-1；
+   * 可以接受一个正则表达式作为参数，根据正则表达式去检索字符串；
+
+4. **replace()**
+
+   可以将字符串中指定内容替换为新的内容；
+
+   * 默认只会替换第一个，使用g参数，替换全局；
+
+```javascript
+//split()拆分
+var str = "123a456b789c000";
+console.log(str.split(/[a-z]/)); //输出：["123", "456", "789", "000"]
+
+//search() 搜索字符串中是否含有指定内容;
+console.log(str.search("4[0-9]6")); //输出:4 （索引）
+
+//match() 可以根据正则表达式，从一个字符串中将符合条件的内容提取出来；
+console.log(str.match(/[a-z]/gi)); //输出：["a", "b", "c"]
+
+//replace()替换
+console.log(str.replace(/[a-z]/gi,"@@")); //输出：123@@456@@789@@000
+```
+
+
+
+
+
+
+
