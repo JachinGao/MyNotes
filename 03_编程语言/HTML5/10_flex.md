@@ -76,3 +76,135 @@
 </html>
 ```
 
+##### 淘宝导航
+
+![pic_016](./res/pic_016.PNG)
+
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Title</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+        }
+
+        .nav {
+            width: 100%;
+        }
+
+        .nav-inner {
+            display: flex;
+            justify-content: space-around;
+        }
+
+        .item {
+            width: 18%;
+            text-align: center;
+        }
+
+        .item img {
+            width: 100%;
+        }
+
+        .item a {
+            color: #333333;
+            text-decoration: none;
+        }
+    </style>
+</head>
+<body>
+<nav class="nav">
+    <div class="nav-inner">
+        <div class="item"><a href="#"><img src="img/16/1.png" alt=""><span>天猫</span></a></div>
+        <div class="item"><a href="#"><img src="img/16/2.png" alt=""><span>聚划算</span></a></div>
+        <div class="item"><a href="#"><img src="img/16/3.png" alt=""><span>天猫国际</span></a></div>
+        <div class="item"><a href="#"><img src="img/16/4.png" alt=""><span>外卖</span></a></div>
+        <div class="item"><a href="#"><img src="img/16/5.png" alt=""><span>天猫超市</span></a></div>
+    </div>
+
+    <div class="nav-inner">
+        <div class="item"><a href="#"><img src="img/16/6.png" alt=""><span>充值中心</span> </a></div>
+        <div class="item"><a href="#"><img src="img/16/7.png" alt=""><span>飞猪旅行</span></a></div>
+        <div class="item"><a href="#"><img src="img/16/8.png" alt=""><span>领金币</span></a></div>
+        <div class="item"><a href="#"><img src="img/16/9.png" alt=""><span>拍卖</span> </a></div>
+        <div class="item"><a href="#"><img src="img/16/10.png" alt=""><span>分类</span></a></div>
+    </div>
+</nav>
+</body>
+</html>
+```
+
+
+
+
+
+### 三、像素
+
+1. 在前端开发中像素要分成两种情况讨论：CSS像素和物理像素；
+
+   * 物理像素，上述所说的小点点就属于物理像素；
+   * CSS像素，编写网页时，我们所用像素都是CSS像素；
+
+2. 浏览器在显示网页时，需要将CSS像素转换为物理像素然后再呈现， 一个css像素最终由几个物理像素显示，由浏览器决定。
+
+3. 视口（viewport）
+
+   视口就是屏幕中用来显示网页的区域，我们可以通过改变视口的大小，来改变CSS像素和物理像素的比值；
+
+4. 移动端
+
+   * 默认情况下，移动端的网页都会将视口设置为980像素（css像素）， 以确保pc端网页可以在移动端正常访问，但是如果网页的宽度超过了980，移动端的浏览器会自动对网页缩放以完整显示网页。
+
+   * 所以基本大部分的pc端网站都可以在移动端中正常浏览，但是往往都不会有一个好的体验，为了解决这个问题，大部分网站都会专门为移动端设计网页。
+
+   *  编写移动页面时，必须要确保有一个比较合理的像素比：
+
+     * 1css像素 对应 2个物理像素；
+     * 1css像素 对应 3个物理像素；
+
+   * 可以通过meta标签来设置视口大小
+
+     ```css
+      <meta name="viewport" content="width=200px">
+     ```
+
+   * 每一款移动设备设计时，都会有一个最佳的像素比，一般我们只需要将像素比设置为该值即可得到一个最佳效果，将像素比设置为最佳像素比的视口大小我们称其为完美视口；
+
+     ```css
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+     ```
+
+5. 视口
+
+   由于不同设备视口和像素比不同，所以同样的375个像素在不同的设备下意义是不一样，比如在iphone6中 375就是全屏，而到了plus中375就会缺一块，在移动端开发时，就不能再使用px来进行布局。
+
+   * vw 表示的是视口的宽度（viewport width），vw这个单位永远相当于视口宽度进行计算；
+     * 100vw = 一个视口的宽度
+     * 1vw = 1%视口宽度
+
+6. VW适配
+
+
+
+### 四、响应式布局
+
+1. 网页可以根据不通的设备或窗口大小呈现出不同的效果；
+
+2. 使用响应式布局，可以使一个网页适用于所有设备；
+
+3. 响应布局的关键就是媒体查询，通过媒体查询，可以为不通的设备，或设备不同状态来分别设置样式；
+
+   ```css
+   @media only screen and (min-width: 500px) and (max-width:700px){
+        body{
+             background-color: #bfa;
+        }
+   }
+   ```
+
+   
+
