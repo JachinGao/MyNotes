@@ -21,7 +21,7 @@
 
 ### 二、创建对象
 
-##### 第一种：
+##### 第一种：使用Object关键字创建
 
 ```javascript
 var obj = new Object();
@@ -36,7 +36,7 @@ console.log(obj);
 {name: "张三", age: 18, gender: "male"}
 ```
 
-##### 第二种：
+##### 第二种：使用对象字面量{}
 
 ```javascript
 var person = {
@@ -48,6 +48,104 @@ console.log(person);
 
 //输出
 {name: "李四", age: 18}
+```
+
+> 字面量 / Object构造函数，原理都是一样，都是JS内置的对象Object。但是它们都是暴露在外面，代码冗余度高，也不清晰，而且无法复用。
+
+
+
+##### 第三种：使用工厂模式创建对象
+
+```js
+function createObject(name, age) {
+	const obj = new Object();
+	obj.name = name;
+	obj.age = age;
+	obj.saiHi = function () {
+		console.log(`hello,${obj.name}`);
+	}
+	return obj;
+}
+let obj1 = createObject('laocao', 22);
+```
+
+> 优点：相对于字面量或者直接调用Object，工厂模式解决了代码封装和冗余的问题，可以生成大量对象。
+>
+> 缺点：无法解决对象类型识别问题，因为都是由Object创建的，类型根本无法判断。
+
+
+
+##### 第四种：用function(函数)来模拟class (无参构造函数、有参构造函数)
+
+```javascript
+//创建一个对象，相当于new一个类的实例
+function Person(){
+}
+var personOne = new Person();//定义一个function，如果有new关键字去"实例化",那么该function可以看作是一个类
+personOne.name = "dylan";
+personOne.hobby = "coding";
+personOne.work = function(){
+	alert(personOne.name+" is coding now...");
+}
+personOne.work();
+```
+
+```javascript
+//可以使用有参构造函数来实现，这样定义更方便，扩展性更强（推荐使用）
+function Pet(name,age,hobby){
+   this.name = name;//this作用域：当前对象
+   this.age = age;
+   this.hobby = hobby;
+   this.eat = function(){
+      alert("我叫"+this.name+",我喜欢"+this.hobby+",也是个吃货");
+   }
+}
+var maidou = new Pet("麦兜",5,"睡觉");//实例化/创建对象 
+maidou.eat();//调用eat方法(函数)
+```
+
+**对比工厂模式，我们可以发现以下区别：**
+
+1. 没有显示地创建对象；
+2. 直接将属性和方法赋给了this对象；
+3. 没有return语句；
+4. 可以识别的对象的类型。对于检测对象类型，我们应该使用instanceof操作符，我们来进行自主检测。
+
+> 缺点：不同实例之间所访问构造函数其实不是同一块内存中存储，由于new的作用，每次实例化对象都会在内存中重新创建一个新对象。这样一来，假如不同实例都需要访问一个功能相同的方法就很不合适，极大浪费了内存。
+
+##### 第五种：原型创建对象
+
+我们在创建一个函数（构造函数）的时候，内部会包含一个很特殊的属性：prototype。这个属性存放着一个指针，指向的是这个构造函数的原型对象，里面包含了所有实例可以共享的属性和方法。
+
+使用原型创建对象的方式，我们无论创建多个实例对象，可以让所有对象实例共享它所包含的属性和方法。
+
+```js
+function Person(){}
+Person.prototype.name = 'Nike';
+Person.prototype.age = 20;
+Person.prototype.jbo = 'teacher';
+Person.prototype.sayName = function(){
+ 	alert(this.name);
+};
+var person1 = new Person();
+person1.sayName();
+```
+
+当为对象实例添加一个属性时，这个属性就会**屏蔽**原型对象中保存的同名属性。
+
+```js
+function Person(){}
+Person.prototype.name = 'Nike';
+Person.prototype.age = 20;
+Person.prototype.jbo = 'teacher';
+Person.prototype.sayName = function(){
+ 	alert(this.name);
+};
+var person1 = new Person();
+var person2 = new Person();
+person1.name ='Greg';
+alert(person1.name); //'Greg' --来自实例
+alert(person2.name); //'Nike' --来自原型
 ```
 
 
@@ -417,7 +515,11 @@ console.log(per1.sayName === per2.sayName);
    true
    ```
 
+   https://www.cnblogs.com/loveyaxin/p/11151586.html
    
+   https://zhuanlan.zhihu.com/p/107847864
+   
+   https://blog.csdn.net/weixin_42429672/article/details/100710861
 
 ### 十五、toString
 
