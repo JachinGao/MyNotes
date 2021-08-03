@@ -138,3 +138,62 @@ null 表示“没有对象”，即该处不应该有值。
 所以 Object.prototype.__proto__ 的值为 null 跟 Object.prototype 没有原型，其实表达了一个意思。
 
 ![type_1](./res/type_5.png)
+
+### 七、instanceof
+
+表达式: A instanceof B
+
+* 如果B函数的显式原型对象在A对象的原型链上, 返回true, 否则返回false；
+
+
+
+### 八、示例
+
+```js
+//测试题1
+ var A = function() {
+
+  }
+  A.prototype.n = 1
+
+  var b = new A()
+
+  A.prototype = {
+    n: 2,
+    m: 3
+  }
+
+  var c = new A()
+  console.log(b.n, b.m, c.n, c.m)
+
+//输出
+// 1 undefined 2 3
+```
+
+```js
+//测试题2
+var F = function(){};
+  Object.prototype.a = function(){
+    console.log('a()')
+  };
+  Function.prototype.b = function(){
+    console.log('b()')
+  };
+  var f = new F();
+  f.a()  // a()
+  f.b()  //调用不到
+  F.a()  //a()
+  F.b()  //b()
+```
+
+
+
+### 九、构造函数、原型、实例对象关系
+
+![type_6](./res/type_6.png)
+
+
+
+
+
+![type_7](./res/type_7.png)
